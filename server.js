@@ -487,11 +487,29 @@ async function createEntry(parentPath, name, type) {
   return { ok: true, path: target, isDir: type === 'dir' };
 }
 
-// 终端里点文件名 → 定位真实文件：先直接 stat，找不到再按 basename 在终端 cwd 下搜最相关
-async function locatePath(p, name, root) {
+// 终端里点文件名 → 定位真实文件：直接 stat → 用 tail 做「空格扩展」逐候选 stat → basename 搜索。
+// 空格扩展：前端对带空格的文件名（macOS 截屏等）只能保守匹配到第一个空格，真实边界
+// 由文件系统验证——把行尾余文按空格边界逐段拼回路径，哪个候选 stat 命中就是哪个
+async function locatePath(p, name, root, tail) {
+  const tryStat = async (cand) => {
+    try { const real = resolvePath(cand); const st = await fsp.stat(real); return { found: true, path: real, isDir: st.isDirectory() }; }
+    catch { return null; }
+  };
   if (p) {
-    try { const real = resolvePath(p); const st = await fsp.stat(real); return { found: true, path: real, isDir: st.isDirectory() }; }
-    catch { /* 直达失败，走搜索 */ }
+    const direct = await tryStat(p);
+    if (direct) return direct;
+    if (tail) {
+      const t = String(tail).slice(0, 160).split(/['"`]/)[0];
+      const cands = [];
+      const re = /\s+/g; let m;
+      while ((m = re.exec(t)) !== null && cands.length < 6) { if (m.index > 0) cands.push(p + t.slice(0, m.index)); }
+      if (t.trim() && cands.length < 6) cands.push(p + t.replace(/\s+$/, ''));
+      cands.sort((a, b) => b.length - a.length); // 长优先：偏向完整文件名
+      for (const c of cands) {
+        const hit = await tryStat(c.replace(/[)\]'"`,.:;。，]+$/, ''));
+        if (hit) return hit;
+      }
+    }
   }
   if (name && root) {
     try {
@@ -819,7 +837,7 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, await recentFiles(qp.get('root') || HOME));
     }
     if (p === '/api/locate') {
-      return sendJSON(res, 200, await locatePath(qp.get('path'), qp.get('name'), qp.get('root')));
+      return sendJSON(res, 200, await locatePath(qp.get('path'), qp.get('name'), qp.get('root'), qp.get('tail')));
     }
     if (p === '/api/git') {
       return sendJSON(res, 200, await gitStatus(qp.get('path') || HOME));

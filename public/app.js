@@ -143,6 +143,8 @@ const CODE_BADGES = {
   sh: ['&gt;_', 8, '#33373D', '#3FD46A'], bash: ['&gt;_', 8, '#33373D', '#3FD46A'], zsh: ['&gt;_', 8, '#33373D', '#3FD46A'],
 };
 const ARCHIVE_EXT = new Set(['zip', 'rar', '7z', 'gz', 'tar', 'tgz', 'bz2', 'xz']);
+// 终端裸文件名识别的扩展名白名单：没有它 e.g/node.js/v1.2 这类词全是误报下划线
+const TERM_LINK_RE_BARE = /(?<=^|[\s'"`(\[（【>：:=])[\p{L}\p{N}_@][\p{L}\p{N}_.\-@/]*\.(?:md|markdown|txt|pdf|png|jpe?g|gif|webp|svg|avif|heic|icns|ico|mp4|mov|webm|mkv|mp3|wav|m4a|flac|json|jsonl|js|mjs|cjs|ts|tsx|jsx|css|scss|sass|less|html?|xml|ya?ml|toml|ini|conf|lock|log|sh|zsh|bash|py|rb|go|rs|java|kt|swift|c|h|cpp|hpp|cs|php|sql|csv|tsv|xlsx?|docx?|pptx?|key|numbers|pages|zip|tar|gz|tgz|dmg|app|plist|epub|srt|vtt|command)(?=$|[.\s'"`)\],:;。，）】])/gu;
 // 文件夹：干净扁平的单色实心文件夹（强色 + 简洁几何，不做作）
 function gFolder(size, color) {
   return `<svg class="rich-glyph" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">`
@@ -1833,8 +1835,9 @@ const term = {
     if (wasHidden) setTimeout(write, 300); else write();
   },
   // 点终端里的文件名/路径 → 结合 cwd + 搜索定位真实文件，在翻箱里打开
-  async openTermPath(id, raw) {
-    let p = String(raw).replace(/[)\]'"`,.:;]+$/, '');
+  // tail：路径在该逻辑行里的后续文本，服务端用它做「空格扩展」stat 验证（带空格的文件名靠它补全）
+  async openTermPath(id, raw, tail) {
+    let p = String(raw).replace(/^['"]+/, '').replace(/[)\]'"`,:;]+$/, '');
     let cwd = state.cwd;
     let candidate = p;
     if (!p.startsWith('/') && !p.startsWith('~')) {
@@ -1843,7 +1846,7 @@ const term = {
     }
     const name = p.split('/').pop();
     const q = encodeURIComponent;
-    const r = await api(`/api/locate?path=${q(candidate)}&name=${q(name)}&root=${q(cwd || state.home)}`);
+    const r = await api(`/api/locate?path=${q(candidate)}&name=${q(name)}&root=${q(cwd || state.home)}&tail=${q(tail || '')}`);
     if (!r.found) { toast('没找到「' + name + '」', true); return; }
     if (r.isDir) { navigate(r.path); toast('已跳到该目录'); return; }
     await navigate(dirOf(r.path));
@@ -1913,23 +1916,69 @@ const term = {
     });
     xterm.onResize(({ cols, rows }) => window.fanboxPty.resize(id, cols, rows));
     // 识别终端输出里的文件路径 → hover 高亮 + 点击在翻箱打开
+    // 三层匹配：引号串（边界最可靠，文件名可含空格）> 斜杠路径 > 带已知扩展名的裸文件名；
+    // 长路径折行用逐 cell 拼回逻辑行（CJK 宽字符占两列，下标→坐标必须按 cell 算才不偏移）
     if (xterm.registerLinkProvider) {
       xterm.registerLinkProvider({
         provideLinks: (lineNo, cb) => {
-          const ln = xterm.buffer.active.getLine(lineNo - 1);
-          if (!ln) { cb(undefined); return; }
-          const text = ln.translateToString(true);
-          const re = /(~\/[^\s'"`:]+|\/[^\s'"`:()]+|\.{1,2}\/[^\s'"`:]+|\b[\w.\-]+\.[A-Za-z][A-Za-z0-9]{0,7}\b)/g;
-          const links = []; let m;
-          while ((m = re.exec(text)) !== null) {
-            const raw = m[0];
-            if (raw.length < 3) continue;
+          const buf = xterm.buffer.active;
+          if (!buf.getLine(lineNo - 1)) { cb(undefined); return; }
+          let startRow = lineNo - 1;
+          while (startRow > 0 && buf.getLine(startRow).isWrapped) startRow--;
+          let endRow = startRow;
+          while (buf.getLine(endRow + 1) && buf.getLine(endRow + 1).isWrapped) endRow++;
+          let text = '';
+          const pos = []; // pos[i] = 第 i 个字符的终端坐标 {x, y, w}
+          for (let row = startRow; row <= endRow; row++) {
+            const ln = buf.getLine(row);
+            if (!ln) break;
+            for (let col = 0; col < ln.length; col++) {
+              const cell = ln.getCell(col);
+              if (!cell || cell.getWidth() === 0) continue; // 宽字符的占位列
+              const ch = cell.getChars() || ' ';
+              for (const c of ch) { text += c; pos.push({ x: col + 1, y: row + 1, w: cell.getWidth() }); }
+            }
+          }
+          const t = text.replace(/\s+$/, '');
+          const links = []; const found = [];
+          const overlaps = (s, e) => found.some((f) => s < f.e && e > f.s);
+          const push = (s, e, cand, tail) => {
+            if (e - s < 3 || overlaps(s, e)) return;
+            const a = pos[s], b = pos[e - 1];
+            if (!a || !b) return;
+            found.push({ s, e, cand, tail });
             links.push({
-              range: { start: { x: m.index + 1, y: lineNo }, end: { x: m.index + raw.length, y: lineNo } },
-              text: raw,
+              range: { start: { x: a.x, y: a.y }, end: { x: b.x + b.w - 1, y: b.y } },
+              text: cand,
               decorations: { pointerCursor: true, underline: true },
-              activate: () => this.openTermPath(id, raw),
+              activate: () => this.openTermPath(id, cand, tail),
             });
+          };
+          let m;
+          // 1. 引号串：拖拽插入/agent 输出常用 '…' 包路径，内容像路径或文件名就整体认
+          const reQ = /'([^']{3,})'|"([^"]{3,})"/g;
+          while ((m = reQ.exec(t)) !== null) {
+            const inner = m[1] || m[2];
+            if (!inner.includes('/') && !/\.[A-Za-z0-9]{1,8}$/.test(inner)) continue;
+            push(m.index + 1, m.index + 1 + inner.length, inner, '');
+          }
+          // 2. 斜杠路径：高亮保守断在空格；点击时把行尾余文交给服务端做空格扩展 stat 验证
+          //（macOS 截屏「截屏2026-06-10 15.37.43.png」这类带空格文件名靠这步补全）
+          const reP = /(?<![\w:/.~\-])(?:~|\.{1,2})?\/[^\s'"`:()]+/gu;
+          while ((m = reP.exec(t)) !== null) {
+            const raw = m[0].replace(/[)\],.:;。，]+$/, '');
+            if (raw.length < 3) continue;
+            const tail = t.slice(m.index + raw.length).split(/['"`]/)[0].slice(0, 160);
+            push(m.index, m.index + raw.length, raw, tail);
+          }
+          // 3. 裸文件名：unicode 字符类（调研.md 能点）+ 扩展名白名单（e.g/node.js 不误报）。
+          // 紧跟斜杠路径、只隔空格的裸名多半是同一带空格路径的后半段：点哪段都按完整串定位
+          //（真分离的如 ls /tmp foo.md，完整串 stat 不中会回落到 basename 搜索，不会开错）
+          while ((m = TERM_LINK_RE_BARE.exec(t)) !== null) {
+            const end = m.index + m[0].length;
+            const prev = found.find((f) => f.tail && f.e <= m.index && /^\s+$/.test(t.slice(f.e, m.index)));
+            if (prev) push(m.index, end, t.slice(prev.s, end), t.slice(end).split(/['"`]/)[0].slice(0, 160));
+            else push(m.index, end, m[0], '');
           }
           cb(links.length ? links : undefined);
         },

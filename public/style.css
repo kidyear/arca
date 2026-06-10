@@ -573,6 +573,9 @@ kbd {
 .imgedit-export select { -webkit-appearance: none; appearance: none; padding-right: 22px; cursor: pointer; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.5' stroke-linecap='round'/></svg>"); background-repeat: no-repeat; background-position: right 7px center; }
 .imgedit-export select:focus, .imgedit-export input:focus { outline: none; border-color: var(--accent); }
 .imgedit-export .ie-spacer { flex: 1; }
+/* 保存主按钮：.primary 此前只在 preview-actions/editor-bar 下有样式，这里没兜住会露出原生白按钮 */
+.imgedit-export button.primary { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; padding: 5px 14px; border-radius: 7px; cursor: pointer; font-size: 12px; }
+.imgedit-export button.primary:hover { filter: brightness(1.06); }
 
 /* 通用输入弹窗 */
 .input-overlay {
