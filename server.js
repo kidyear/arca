@@ -693,12 +693,32 @@ async function diskUsage(p) {
     try { const st = await fsp.lstat(full); if (st.isFile()) items.push({ name: d.name, size: st.size, isDir: false }); } catch { /* */ }
   }));
   if (dirs.length) {
-    const out = await new Promise((resolve) => {
-      execFile('du', ['-sk', ...dirs], { timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => resolve(stdout || ''));
-    });
-    for (const line of out.split('\n')) {
-      const m = line.match(/^(\d+)\s+(.+)$/);
-      if (m) items.push({ name: path.basename(m[2]), size: Number(m[1]) * 1024, isDir: true });
+    if (PLATFORM === 'win32') {
+      // Windows 没有 du：PowerShell 递归求和。目录清单走环境变量传入（中文/空格安全）
+      const PS_DU = `$ErrorActionPreference='SilentlyContinue'
+$env:FANBOX_DU_DIRS -split "\\n" | ForEach-Object {
+  $d = $_.Trim(); if (-not $d) { return }
+  $s = (Get-ChildItem -LiteralPath $d -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object -Sum Length).Sum
+  if ($null -eq $s) { $s = 0 }
+  Write-Output ("{0}\`t{1}" -f [int64]$s, $d)
+}`;
+      const out = await new Promise((resolve) => {
+        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_DU],
+          { timeout: 120000, maxBuffer: 8 * 1024 * 1024, windowsHide: true, env: { ...process.env, FANBOX_DU_DIRS: dirs.join('\n') } },
+          (err, stdout) => resolve(stdout || ''));
+      });
+      for (const line of out.split('\n')) {
+        const m = line.match(/^(\d+)\t(.+)$/);
+        if (m) items.push({ name: path.basename(m[2].trim()), size: Number(m[1]), isDir: true });
+      }
+    } else {
+      const out = await new Promise((resolve) => {
+        execFile('du', ['-sk', ...dirs], { timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => resolve(stdout || ''));
+      });
+      for (const line of out.split('\n')) {
+        const m = line.match(/^(\d+)\s+(.+)$/);
+        if (m) items.push({ name: path.basename(m[2]), size: Number(m[1]) * 1024, isDir: true });
+      }
     }
   }
   items.sort((a, b) => b.size - a.size);
@@ -718,11 +738,20 @@ async function archiveList(p) {
   const entries = [];
   try {
     if (/\.(zip|jar)$/.test(name)) {
-      const out = await run('unzip', ['-l', '--', file]);
-      for (const line of out.split('\n')) {
-        const m = line.match(/^\s*(\d+)\s+\S+\s+\S+\s+(.+)$/);
-        if (m) entries.push({ name: m[2], size: Number(m[1]) });
-        if (entries.length > MAX) break;
+      if (PLATFORM === 'win32') {
+        // Windows 没有 unzip，但 Win10+ 自带 bsdtar，能直接列 zip（只有文件名没有单文件大小）
+        const out = await run('tar', ['-tf', file]);
+        for (const line of out.split('\n')) {
+          if (line.trim()) entries.push({ name: line });
+          if (entries.length > MAX) break;
+        }
+      } else {
+        const out = await run('unzip', ['-l', '--', file]);
+        for (const line of out.split('\n')) {
+          const m = line.match(/^\s*(\d+)\s+\S+\s+\S+\s+(.+)$/);
+          if (m) entries.push({ name: m[2], size: Number(m[1]) });
+          if (entries.length > MAX) break;
+        }
       }
     } else if (/\.(tar|tgz|tbz2?|txz)$/.test(name) || /\.tar\.(gz|bz2|xz|zst)$/.test(name)) {
       const out = await run('tar', ['-tf', file]); // bsdtar 自动识别压缩格式
@@ -731,6 +760,7 @@ async function archiveList(p) {
         if (entries.length > MAX) break;
       }
     } else if (/\.gz$/.test(name)) {
+      if (PLATFORM === 'win32') return { ok: false, error: 'Windows 上暂不支持单独的 .gz 清单，可在系统解压软件中打开' };
       const out = await run('gzip', ['-l', file]);
       const m = out.split('\n')[1] && out.split('\n')[1].match(/^\s*\d+\s+(\d+)/);
       entries.push({ name: path.basename(file, '.gz'), size: m ? Number(m[1]) : undefined });
