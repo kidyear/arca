@@ -1697,7 +1697,7 @@ function renderRecents() {
       ev.preventDefault();
       ev.stopPropagation();
       popupMenu(ev, [
-        { label: '在翻箱中打开', fn: () => openRecent(p) },
+        { label: '在灵匣中打开', fn: () => openRecent(p) },
         { label: '用系统默认应用打开', fn: () => openWith(p) },
         { label: '在 Finder 显示', fn: () => openWith(p, 'reveal') },
         { label: '复制路径', fn: () => copyPath(p) },
@@ -1911,7 +1911,7 @@ function maybeShowGuide() {
   ov.className = 'guide-overlay';
   ov.innerHTML = `<div class="guide-card">
     <div class="guide-logo">${svgWrap(SVG.box, 'currentColor', 46, true)}</div>
-    <h2>欢迎用 FanBox</h2>
+    <h2>欢迎用 灵匣</h2>
     <p>vibe coding 的驾驶舱——找文件、跑 agent、看它改、随手改，都在一个窗口：</p>
     <ul>
       <li><b>${MOD}K</b> 全局搜文件和文件夹；<b>${MOD}↵</b> 把项目直接在编辑器整包打开；<code>内容:关键词</code> 搜文件里的字</li>

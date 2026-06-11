@@ -299,7 +299,7 @@ module.exports = function createAI(ctx) {
           systemPrompt: {
             type: 'preset', preset: 'claude_code',
             append: [
-              '你在「翻箱 FanBox」的对话面板里工作，用户可能不熟悉技术——回答说人话、保持简洁、始终用中文。',
+              '你在「灵匣 LingXia」的对话面板里工作，用户可能不熟悉技术——回答说人话、保持简洁、始终用中文。',
               '产出尽量落成文件（写到当前工作目录），并在回答里给出文件路径。',
               '删除、覆盖、批量改动前先用一两句话说明影响。',
             ].join('\n'),

@@ -21,7 +21,7 @@ window.FanboxDocx = {
       ref,
       documentBuffer: buffer,
       mode: opts.mode || 'editing',
-      author: opts.author || '翻箱用户',
+      author: opts.author || '灵匣用户',
       onChange: opts.onChange,
     }));
     return {

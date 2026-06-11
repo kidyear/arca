@@ -1,7 +1,7 @@
 {
-  "name": "fanbox",
+  "name": "lingxia",
   "version": "1.7.2",
-  "description": "FanBox — the cockpit for vibe coding. Browse/search/preview/edit local files, command coding agents from the built-in terminal.",
+  "description": "灵匣 LingXia — 文件夹操作 × AI Agent 的结合体。匣中有灵:文件信手可得,活儿交给 AI 办。信步 SEAVO 公司版,基于开源 FanBox。",
   "bin": {
     "fanbox": "server.js"
   },
@@ -20,8 +20,8 @@
     "build:xlsx": "esbuild src-vendor/xlsx-entry.js --bundle --format=iife --minify --outfile=public/vendor/xlsx/xlsx.js"
   },
   "build": {
-    "appId": "com.huashu.fanbox",
-    "productName": "FanBox",
+    "appId": "com.seavo.lingxia",
+    "productName": "灵匣 LingXia",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -48,7 +48,7 @@
       ]
     },
     "dmg": {
-      "title": "FanBox",
+      "title": "灵匣 LingXia",
       "writeUpdateInfo": false
     },
     "win": {
@@ -59,13 +59,13 @@
           "arch": "x64"
         }
       ],
-      "artifactName": "FanBox-Setup-${version}.exe"
+      "artifactName": "LingXia-Setup-${version}.exe"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "翻箱 FanBox",
+      "shortcutName": "灵匣 LingXia",
       "writeUpdateInfo": false
     }
   },
