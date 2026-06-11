@@ -810,9 +810,19 @@ function hostAllowed(req) {
   const host = (req.headers.host || '').replace(/:\d+$/, '');
   return ALLOWED_HOSTS.has(host);
 }
+// 挡跨站请求伪造（CSRF）：写操作全走 POST，而 text/plain 的 POST 是「简单请求」不触发预检，
+// 仅靠 Host 校验拦不住——任意网页都能 fetch 本机 POST 偷偷改文件（响应跨域读不到，但副作用已落地）。
+// 浏览器强制带的 Origin 头 JS 改不了：非回环 origin 一律拒。无 Origin（同源 GET / curl /
+// Electron 主进程 net.fetch）放行；字面 'null'（sandbox iframe / file://）解析失败即拒。
+function originAllowed(req) {
+  const o = req.headers.origin;
+  if (!o) return true;
+  try { return ALLOWED_HOSTS.has(new URL(o).hostname); } catch { return false; }
+}
 
 const server = http.createServer(async (req, res) => {
   if (!hostAllowed(req)) { res.writeHead(403); res.end('forbidden host'); return; }
+  if (req.method === 'POST' && !originAllowed(req)) { res.writeHead(403); res.end('forbidden origin'); return; }
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
   const qp = url.searchParams;

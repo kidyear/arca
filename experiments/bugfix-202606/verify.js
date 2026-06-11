@@ -1,9 +1,22 @@
 // 2026-06 批量修复的自动化验收：Playwright 驱动 Electron（假 HOME，不碰真实数据，不影响正在跑的翻箱）。
 // 覆盖：①冷启动 PTY 列宽 ②IME CapsLock 双写 ③通知误报四场景 ④标签项目识别/双击定位/Claude 按钮
-// ⑤滚动失同步（隐藏期灌行后能滚到底）⑥裸文件名回扫定位（带同名诱饵）。共 14 项断言。
+// ⑤滚动失同步（隐藏期灌行后能滚到底）⑥裸文件名回扫定位（带同名诱饵）⑦CSRF Origin 校验。共 16 项断言。
 const { _electron } = require('playwright-core');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
+
+// 对运行中的服务端发裸 HTTP POST（Node 能自由设 Origin，浏览器 fetch 不行），测 CSRF 拦截
+function postWrite(origin, target, content) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ path: target, content });
+    const req = http.request({ host: '127.0.0.1', port: 4640, path: '/api/write', method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'text/plain', 'Content-Length': Buffer.byteLength(body) }, origin ? { Origin: origin } : {}) },
+      (r) => { let d = ''; r.on('data', (c) => (d += c)); r.on('end', () => resolve({ status: r.statusCode, body: d })); });
+    req.on('error', (e) => resolve({ status: 0, body: String(e) }));
+    req.write(body); req.end();
+  });
+}
 const ROOT = path.resolve(__dirname, '../..');
 const HOME = '/tmp/fb-verify-home';
 let fails = 0;
@@ -176,6 +189,14 @@ setTimeout(() => { console.error('FAIL: watchdog 超时'); process.exit(2); }, 2
   }, { proj, decoy, cwdDir });
   check(loc.first === proj + '/lovart_2ffda3364d71.png', '回扫首候选=最近出现的全路径', loc.first);
   check((loc.cwd || '').endsWith('2026.06-Fable5发布视频') && (loc.selected || '').endsWith('lovart_2ffda3364d71.png'), '裸文件名点击避开诱饵定位真身', JSON.stringify({ cwd: loc.cwd, sel: loc.selected }));
+
+  // ---------- ⑦ CSRF：跨站 Origin 的写请求必须被拒，回环 Origin 放行 ----------
+  const evilTarget = path.join(HOME, 'Desktop', 'csrf-evil.txt');
+  const okTarget = path.join(HOME, 'Desktop', 'csrf-ok.txt');
+  const evil = await postWrite('https://evil.example.com', evilTarget, 'pwned');
+  check(evil.status === 403 && !fs.existsSync(evilTarget), '跨站 Origin 写请求被拒', 'status=' + evil.status + ' wrote=' + fs.existsSync(evilTarget));
+  const ok = await postWrite('http://localhost:4640', okTarget, 'hi');
+  check(ok.status === 200 && fs.existsSync(okTarget), '回环 Origin 写请求放行', 'status=' + ok.status + ' wrote=' + fs.existsSync(okTarget));
 
   // ---------- 截图自校验（标签色点/面包屑配对色点） ----------
   fs.mkdirSync(path.join(__dirname, 'shots'), { recursive: true });
