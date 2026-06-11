@@ -1155,3 +1155,11 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 .xlsx-host table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
 .xlsx-host td, .xlsx-host th { border: 1px solid var(--border); padding: 3px 8px; color: var(--text); white-space: nowrap; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
 .xlsx-host tr:first-child td { background: var(--bg-3); font-weight: 600; }
+
+/* ---------- 侧栏分组折叠（公司版）---------- */
+.nav-title.nav-collapsible { cursor: pointer; user-select: none; }
+.nav-title.nav-collapsible:hover { color: var(--text-dim); }
+.nav-title .nav-arrow { margin-left: auto; font-size: 9px; color: var(--text-faint); }
+.nav-section.nav-collapsed .nav-list { display: none; }
+/* Agent 项目就算展开也别无限长，内部滚动,别把下面区块顶出视野 */
+#agent-projects-list { max-height: 230px; overflow-y: auto; }

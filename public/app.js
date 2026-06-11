@@ -3872,6 +3872,31 @@ const aiSettings = {
   },
 };
 
+// ---------- 侧栏分组折叠（公司版）：Agent 项目一长就把下面的皮肤/状态区挡没了 ----------
+// 点分组标题收起/展开，状态记进 localStorage；带列表的分组都生效
+function initNavCollapse() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('fb_nav_collapsed') || '{}'); } catch { /* */ }
+  document.querySelectorAll('#sidebar .nav-section').forEach((sec) => {
+    const title = sec.querySelector('.nav-title');
+    const list = sec.querySelector('.nav-list');
+    if (!title || !list || !list.id) return;
+    const key = list.id;
+    const arrow = document.createElement('span');
+    arrow.className = 'nav-arrow';
+    title.appendChild(arrow);
+    const apply = (c) => { sec.classList.toggle('nav-collapsed', c); arrow.textContent = c ? '▸' : '▾'; };
+    apply(!!saved[key]);
+    title.classList.add('nav-collapsible');
+    title.addEventListener('click', () => {
+      const c = !sec.classList.contains('nav-collapsed');
+      saved[key] = c;
+      apply(c);
+      localStorage.setItem('fb_nav_collapsed', JSON.stringify(saved));
+    });
+  });
+}
+
 // ---------- 启动 ----------
 async function init() {
   // 桌面 app：标记 body，给顶部交通灯留位、顶部可拖拽（交通灯避让仅 mac 需要，按平台打 class）
@@ -3922,6 +3947,7 @@ async function init() {
   await navigate(state.home, false);
   chat.init();
   aiSettings.init();
+  initNavCollapse();
   // 恢复上次终端开合状态（dock 方位已由 applyDock 自带记忆）；上次停在对话模式则恢复对话
   if (localStorage.getItem('fb_term_open') === '1' && term.available()) term.open();
   if (localStorage.getItem('fb_term_open') === '1' && localStorage.getItem('fb_dock_mode') === 'chat') chat.open();
