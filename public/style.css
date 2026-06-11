@@ -1211,3 +1211,23 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 /* 主操作（打开/发送/启动）保持火焰填充；hover 加深，不发光 */
 [data-theme="seavo"] .preview-actions button.primary:hover,
 [data-theme="seavo"] .chat-send-btn:hover { background: #D04013; }
+
+/* ---- 信步规范补全（对照 ui_kits/fanbox 设计稿）---- */
+/* 自有界面（对话/模板/AI设置/Office/Skills）统一近直角:不用胶囊、不用大圆角;
+   功能性圆形(状态点/开关圆钮)不在此列 */
+[data-theme="seavo"] :is(.dock-modes, .dock-modes button, .chat-msg.user, .chat-md, .chat-md pre,
+  .chat-error, .chat-approval, .ap-allow, .ap-deny, .chat-chip, #chat-input, .chat-send-btn,
+  .ai-provider, .ai-flags i, .ai-row input, .ai-model-opt, #chat-new, .chat-item,
+  .sk-chip, .sk-sort, .sk-detail .fd-acts button,
+  .tpl-back, .tpl-chip, .tpl-card, .tpl-form, .tpl-files, .tpl-field input,
+  .docx-host, .xlsx-tab, .xlsx-host) { border-radius: var(--radius); }
+
+/* 图标投影换暖中性(不用纯黑) */
+[data-theme="seavo"] .grid .item .icon .svg-icon { filter: drop-shadow(0 2px 5px rgba(22, 20, 15, 0.10)); }
+
+/* 侧栏底部 SEAVO 字标(仅信步皮肤显示) */
+.seavo-mark { display: none; }
+[data-theme="seavo"] .sidebar-foot { flex-wrap: wrap; }
+[data-theme="seavo"] .seavo-mark { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--border); }
+.seavo-mark img { height: 12px; width: auto; opacity: .8; }
+.seavo-mark span { font-family: var(--font-display); font-size: 10px; letter-spacing: .08em; color: var(--text-faint); }

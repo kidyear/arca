@@ -72,6 +72,13 @@ function iconColorFor(e) {
     if (['csv', 'tsv', 'sql'].includes(ex)) return '#8a7a48';
     return '#9b8b6e';
   }
+  if (t === 'seavo') {
+    // 设计稿:文件夹用火焰橘红;文档类走工程石板灰;其余暖墨降饱和
+    if (e.isDir) return '#E94A16';
+    if (['md', 'markdown', 'txt', 'pdf'].includes(ex)) return '#45576B';
+    if (['csv', 'tsv', 'sql'].includes(ex)) return '#3C7D4F';
+    return '#595249';
+  }
   if (t === 'editorial') {
     if (e.isDir) return '#0a0a0a';
     if (['html', 'htm'].includes(ex)) return '#ff433d';

@@ -815,6 +815,64 @@ $env:FANBOX_DU_DIRS -split "\\n" | ForEach-Object {
 }
 
 // 压缩包内容清单：全用系统自带工具（unzip / bsdtar / gzip），保持零依赖
+// 自己解析 zip 中央目录：unzip/bsdtar 对非 UTF-8 文件名（Windows GBK 压缩包）只会输出乱码，
+// 原始字节自己读、按 UTF-8 标志位判断 + GBK 回退解码；顺带跨平台拿到单文件大小（上游 issue #9）
+async function zipCentralDirList(file, MAX) {
+  const fh = await fsp.open(file, 'r');
+  try {
+    const { size: fsize } = await fh.stat();
+    // EOCD 在文件尾部（zip 注释最长 64KB），从后往前扫签名
+    const tailLen = Math.min(fsize, 65557);
+    const tail = Buffer.alloc(tailLen);
+    await fh.read(tail, 0, tailLen, fsize - tailLen);
+    let eocd = -1;
+    for (let i = tailLen - 22; i >= 0; i--) {
+      if (tail.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('不是有效的 zip');
+    let count = tail.readUInt16LE(eocd + 10);
+    let cdSize = tail.readUInt32LE(eocd + 12);
+    let cdOff = tail.readUInt32LE(eocd + 16);
+    if (cdOff === 0xFFFFFFFF || cdSize === 0xFFFFFFFF || count === 0xFFFF) {
+      // ZIP64：EOCD 紧前面是 20 字节 locator，指向 zip64 EOCD
+      const loc = Buffer.alloc(20);
+      await fh.read(loc, 0, 20, fsize - tailLen + eocd - 20);
+      if (loc.readUInt32LE(0) !== 0x07064b50) throw new Error('zip64 缺 locator');
+      const z64 = Buffer.alloc(56);
+      await fh.read(z64, 0, 56, Number(loc.readBigUInt64LE(8)));
+      if (z64.readUInt32LE(0) !== 0x06064b50) throw new Error('zip64 缺 EOCD');
+      count = Number(z64.readBigUInt64LE(32));
+      cdSize = Number(z64.readBigUInt64LE(40));
+      cdOff = Number(z64.readBigUInt64LE(48));
+    }
+    const cd = Buffer.alloc(Math.min(cdSize, 16 * 1024 * 1024));
+    await fh.read(cd, 0, cd.length, cdOff);
+    const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+    let gbk = null;
+    try { gbk = new TextDecoder('gbk'); } catch { /* 无 ICU 的精简版 Node */ }
+    const entries = [];
+    let pos = 0;
+    while (pos + 46 <= cd.length && entries.length <= MAX) {
+      if (cd.readUInt32LE(pos) !== 0x02014b50) break;
+      const flags = cd.readUInt16LE(pos + 8);
+      const usize = cd.readUInt32LE(pos + 24);
+      const nlen = cd.readUInt16LE(pos + 28);
+      const elen = cd.readUInt16LE(pos + 30);
+      const clen = cd.readUInt16LE(pos + 32);
+      const raw = cd.subarray(pos + 46, pos + 46 + nlen);
+      let nm;
+      if (flags & 0x0800) nm = raw.toString('utf8'); // 通用位 11 = 文件名是 UTF-8
+      else {
+        try { nm = utf8Strict.decode(raw); } // 没打标但实际是合法 UTF-8（macOS 归档工具常见）
+        catch { nm = gbk ? gbk.decode(raw) : raw.toString('latin1'); }
+      }
+      if (nm) entries.push(nm.endsWith('/') ? { name: nm } : { name: nm, size: usize });
+      pos += 46 + nlen + elen + clen;
+    }
+    return entries;
+  } finally { await fh.close(); }
+}
+
 async function archiveList(p) {
   const file = resolvePath(p);
   try { await fsp.stat(file); } catch { return { ok: false, error: '文件不存在' }; }
@@ -823,22 +881,26 @@ async function archiveList(p) {
     execFile(cmd, args, { timeout: 15000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
   });
   const MAX = 800;
-  const entries = [];
+  let entries = [];
   try {
     if (/\.(zip|jar)$/.test(name)) {
-      if (PLATFORM === 'win32') {
-        // Windows 没有 unzip，但 Win10+ 自带 bsdtar，能直接列 zip（只有文件名没有单文件大小）
-        const out = await run('tar', ['-tf', file]);
-        for (const line of out.split('\n')) {
-          if (line.trim()) entries.push({ name: line });
-          if (entries.length > MAX) break;
-        }
-      } else {
-        const out = await run('unzip', ['-l', '--', file]);
-        for (const line of out.split('\n')) {
-          const m = line.match(/^\s*(\d+)\s+\S+\s+\S+\s+(.+)$/);
-          if (m) entries.push({ name: m[2], size: Number(m[1]) });
-          if (entries.length > MAX) break;
+      try {
+        entries = await zipCentralDirList(file, MAX); // 中文文件名不乱码，win/mac 同一条路
+      } catch {
+        // 解析失败（损坏/加密/奇异格式）退回外部工具
+        if (PLATFORM === 'win32') {
+          const out = await run('tar', ['-tf', file]);
+          for (const line of out.split('\n')) {
+            if (line.trim()) entries.push({ name: line });
+            if (entries.length > MAX) break;
+          }
+        } else {
+          const out = await run('unzip', ['-l', '--', file]);
+          for (const line of out.split('\n')) {
+            const m = line.match(/^\s*(\d+)\s+\S+\s+\S+\s+(.+)$/);
+            if (m) entries.push({ name: m[2], size: Number(m[1]) });
+            if (entries.length > MAX) break;
+          }
         }
       }
     } else if (/\.(tar|tgz|tbz2?|txz)$/.test(name) || /\.tar\.(gz|bz2|xz|zst)$/.test(name)) {

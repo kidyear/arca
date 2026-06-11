@@ -19,6 +19,7 @@ window.FANBOX_DICT = {
   '终端核 Volt': 'Terminal-core Volt',
   '编辑式 · 索引日报': 'Editorial · index daily',
   '本地运行 · 数据不出本机': 'Runs locally · data never leaves this Mac',
+  '内部工具 · 信步设计系统': 'Internal tool · SEAVO Design System',
   '拖动调整侧栏宽度': 'Drag to resize sidebar',
   '展开子文件夹': 'Expand subfolders',
   '没有子文件夹': 'No subfolders',
