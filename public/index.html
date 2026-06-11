@@ -81,6 +81,7 @@
           </div>
           <button id="btn-changes" class="ghost-btn" title="本会话 agent 改过的文件（点击回看 / diff）"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg> 变更<span id="changes-badge" class="changes-badge hidden">0</span></button>
           <button id="btn-recent" class="ghost-btn" title="此处最近修改的文件"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 最近</button>
+          <button id="btn-chat" class="ghost-btn" title="打开 AI 对话面板：自然语言指挥 AI 整理/读写文件"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg> 对话</button>
           <button id="btn-terminal" class="ghost-btn" title="在当前目录打开系统终端"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> 终端</button>
         </div>
       </header>
@@ -112,6 +113,10 @@
         <div id="terminal-resizer" class="hidden"></div>
         <section id="terminal-panel" class="hidden">
           <header class="term-head">
+            <div class="dock-modes">
+              <button id="mode-chat" title="AI 对话面板">对话</button>
+              <button id="mode-term" title="内嵌终端">终端</button>
+            </div>
             <div class="term-tabs" id="term-tabs"></div>
             <div class="term-actions">
               <button id="term-claude" class="agent-launch" title="在终端启动 Claude Code"><svg width="15" height="15" viewBox="0 0 256 257" preserveAspectRatio="xMidYMid"><path fill="#D97757" d="m50.228 170.321 50.357-28.257.843-2.463-.843-1.361h-2.462l-8.426-.518-28.775-.778-24.952-1.037-24.175-1.296-6.092-1.297L0 125.796l.583-3.759 5.12-3.434 7.324.648 16.202 1.101 24.304 1.685 17.629 1.037 26.118 2.722h4.148l.583-1.685-1.426-1.037-1.101-1.037-25.147-17.045-27.22-18.017-14.258-10.37-7.713-5.25-3.888-4.925-1.685-10.758 7-7.713 9.397.649 2.398.648 9.527 7.323 20.35 15.75L94.817 91.9l3.889 3.24 1.555-1.102.195-.777-1.75-2.917-14.453-26.118-15.425-26.572-6.87-11.018-1.814-6.61c-.648-2.723-1.102-4.991-1.102-7.778l7.972-10.823L71.42 0 82.05 1.426l4.472 3.888 6.61 15.101 10.694 23.786 16.591 32.34 4.861 9.592 2.592 8.879.973 2.722h1.685v-1.556l1.36-18.211 2.528-22.36 2.463-28.776.843-8.1 4.018-9.722 7.971-5.25 6.222 2.981 5.12 7.324-.713 4.73-3.046 19.768-5.962 30.98-3.889 20.739h2.268l2.593-2.593 10.499-13.934 17.628-22.036 7.778-8.749 9.073-9.657 5.833-4.601h11.018l8.1 12.055-3.628 12.443-11.342 14.388-9.398 12.184-13.48 18.147-8.426 14.518.778 1.166 2.01-.194 30.46-6.481 16.462-2.982 19.637-3.37 8.88 4.148.971 4.213-3.5 8.62-20.998 5.184-24.628 4.926-36.682 8.685-.454.324.519.648 16.526 1.555 7.065.389h17.304l32.21 2.398 8.426 5.574 5.055 6.805-.843 5.184-12.962 6.611-17.498-4.148-40.83-9.721-14-3.5h-1.944v1.167l11.666 11.406 21.387 19.314 26.767 24.887 1.36 6.157-3.434 4.86-3.63-.518-23.526-17.693-9.073-7.972-20.545-17.304h-1.36v1.814l4.73 6.935 25.017 37.59 1.296 11.536-1.814 3.76-6.481 2.268-7.13-1.297-14.647-20.544-15.1-23.138-12.185-20.739-1.49.843-7.194 77.448-3.37 3.953-7.778 2.981-6.48-4.925-3.436-7.972 3.435-15.749 4.148-20.544 3.37-16.333 3.046-20.285 1.815-6.74-.13-.454-1.49.194-15.295 20.999-23.267 31.433-18.406 19.702-4.407 1.75-7.648-3.954.713-7.064 4.277-6.286 25.47-32.405 15.36-20.092 9.917-11.6-.065-1.686h-.583L44.07 198.125l-12.055 1.555-5.185-4.86.648-7.972 2.463-2.593 20.35-13.999-.064.065Z"/></svg></button>
@@ -126,9 +131,64 @@
             </div>
           </header>
           <div id="xterm-host"></div>
+          <div id="chat-host">
+            <aside id="chat-side">
+              <button id="chat-new" title="开始新对话">＋ 新对话</button>
+              <div id="chat-list"></div>
+            </aside>
+            <div id="chat-main">
+              <div id="chat-msgs"><div class="chat-empty" id="chat-empty">
+                <p><b>跟 AI 说要做什么就行</b></p>
+                <p>底下跑的是完整的 Claude Code 引擎：能浏览、搜索、读写你本机的文件，也能执行命令——改文件和跑命令前都会先弹卡片征求你同意。</p>
+                <p class="chat-empty-hint">试试：「把这个文件夹里的文件按类型整理一下」· 把文件拖进来当附件 · 右上角 ⚙ 换模型</p>
+              </div></div>
+              <div id="chat-composer">
+                <div id="chat-chips" class="hidden"></div>
+                <textarea id="chat-input" rows="2" placeholder="跟 AI 说要做什么…（拖文件进来作为附件，Enter 发送，Shift+Enter 换行）"></textarea>
+                <div class="chat-bar">
+                  <span id="chat-model" class="chat-model" title="当前模型（点 ⚙ 更换）"></span>
+                  <span class="chat-flex"></span>
+                  <button id="chat-stop" class="ghost-btn hidden">⏹ 停止</button>
+                  <button id="chat-settings" class="ghost-btn" title="AI 模型设置">⚙</button>
+                  <button id="chat-send" class="chat-send-btn">发送</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </main>
+  </div>
+
+  <!-- AI 模型设置 -->
+  <div id="ai-settings" class="ai-overlay hidden">
+    <div class="ai-panel">
+      <header class="ai-head"><b>AI 模型设置</b><span class="chat-flex"></span><button id="ai-close" class="ghost-btn">✕</button></header>
+      <div class="ai-body">
+        <div id="ai-provider-list" class="ai-providers"></div>
+        <div class="ai-form">
+          <label class="ai-row">API Key
+            <input id="ai-key" type="password" placeholder="粘贴该服务商的 API key（留空 = 保持已存的不变）" autocomplete="off">
+          </label>
+          <label class="ai-row">Base URL
+            <input id="ai-baseurl" placeholder="https://…（预设服务商一般不用改；中转站必填）" autocomplete="off">
+          </label>
+          <label class="ai-row">模型
+            <span class="ai-model-row">
+              <input id="ai-model" placeholder="模型 ID，可手填" autocomplete="off">
+              <button id="ai-fetch-models" class="ghost-btn" title="拉取该服务商当前可用的模型列表">拉取列表</button>
+            </span>
+          </label>
+          <div id="ai-model-pick" class="ai-model-pick hidden"></div>
+          <div class="ai-actions">
+            <span id="ai-status" class="ai-status"></span>
+            <span class="chat-flex"></span>
+            <button id="ai-save" class="chat-send-btn">保存并启用</button>
+          </div>
+          <p class="ai-note">key 明文保存在本机配置文件里，仅发往所选服务商的 API；翻箱本身不上传任何数据。</p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 命令面板 -->

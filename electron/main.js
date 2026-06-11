@@ -39,13 +39,16 @@ function saveBounds() {
 
 function createWindow() {
   const b = loadBounds();
+  // hiddenInset 标题栏 + vibrancy 是 macOS 专属；Windows/Linux 用系统原生标题栏
+  const macChrome = process.platform === 'darwin'
+    ? { titleBarStyle: 'hiddenInset', vibrancy: 'sidebar', visualEffectState: 'active' }
+    : {};
   win = new BrowserWindow({
     width: b.width, height: b.height, x: b.x, y: b.y,
     minWidth: 920, minHeight: 600,
-    titleBarStyle: 'hiddenInset',
     backgroundColor: '#0b0c0a',
-    vibrancy: 'sidebar',
-    visualEffectState: 'active',
+    ...macChrome,
+    ...(process.platform === 'win32' ? { icon: path.join(__dirname, '..', 'build', 'icon.png') } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -94,20 +97,47 @@ function cmpVer(a, b) {
   for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
   return 0;
 }
+// 更新源三选一（优先级从高到低）：
+// 1. 内网静态 JSON（公司分发推荐，员工不必能连 GitHub）：
+//    env FANBOX_UPDATE_URL 或 ~/.fanbox/config.json 的 "updateUrl" 字段，
+//    指向形如 {"version":"1.6.0","url":"http://内网/fanbox/下载页或安装包"} 的 JSON
+// 2. GitHub Releases：env FANBOX_UPDATE_REPO=org/repo
+// 3. 默认：macOS 查上游仓库；Windows 关闭（上游只发 dmg）
+function readFanboxConfig() {
+  try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.fanbox', 'config.json'), 'utf8')); } catch { return {}; }
+}
+let lastUpdateUrl = ''; // update:open 只允许打开本轮检测刚拿到的链接，不开任意 URL
 async function checkUpdate() {
   try {
-    const res = await net.fetch('https://api.github.com/repos/alchaincyf/fanbox/releases/latest', {
-      headers: { 'User-Agent': 'fanbox-app', Accept: 'application/vnd.github+json' },
-    });
-    if (!res.ok) return;
-    const rel = await res.json();
-    const latest = rel.tag_name || '';
-    if (latest && cmpVer(latest, app.getVersion()) > 0 && win && !win.isDestroyed()) {
-      win.webContents.send('update:available', { version: latest.replace(/^v/, ''), url: rel.html_url });
+    const feedUrl = process.env.FANBOX_UPDATE_URL || readFanboxConfig().updateUrl || '';
+    let latest = '', page = '';
+    if (feedUrl) {
+      const res = await net.fetch(feedUrl, { headers: { 'User-Agent': 'fanbox-app' }, cache: 'no-store' });
+      if (!res.ok) return;
+      const j = await res.json();
+      latest = String(j.version || '').replace(/^v/, '');
+      page = String(j.url || feedUrl);
+    } else {
+      const repo = process.env.FANBOX_UPDATE_REPO || (process.platform === 'darwin' ? 'alchaincyf/fanbox' : '');
+      if (!repo) return;
+      const res = await net.fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+        headers: { 'User-Agent': 'fanbox-app', Accept: 'application/vnd.github+json' },
+      });
+      if (!res.ok) return;
+      const rel = await res.json();
+      latest = String(rel.tag_name || '').replace(/^v/, '');
+      page = rel.html_url;
     }
-  } catch { /* 离线/被墙：静默，下次再查 */ }
+    if (latest && cmpVer(latest, app.getVersion()) > 0 && win && !win.isDestroyed()) {
+      lastUpdateUrl = page;
+      console.log(`[更新] 发现新版本 v${latest} → ${page}`);
+      win.webContents.send('update:available', { version: latest, url: page });
+    }
+  } catch { /* 离线/内网源不可达：静默，下次再查 */ }
 }
-ipcMain.handle('update:open', (e, { url }) => { if (/^https:\/\/github\.com\//.test(String(url))) shell.openExternal(url); });
+ipcMain.handle('update:open', (e, { url }) => {
+  if (url && url === lastUpdateUrl && /^https?:\/\//.test(String(url))) shell.openExternal(url);
+});
 
 // 原生菜单——关键是 Edit role，终端里的 ⌘C/⌘V 才生效
 function buildMenu() {
@@ -154,11 +184,15 @@ app.on('window-all-closed', () => {
 // ---------- 终端 IPC（node-pty）----------
 ipcMain.handle('pty:spawn', (e, { id, cwd, cols, rows }) => {
   if (!pty) return { ok: false, error: 'node-pty 未编译，跑：npm run rebuild' };
-  const shellPath = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh');
+  const isWin = process.platform === 'win32';
+  // Windows 上 SHELL 变量通常不存在；优先 PowerShell（agent 体验好于 cmd），ConPTY 原生支持 UTF-8
+  const shellPath = isWin
+    ? 'powershell.exe'
+    : (process.env.SHELL || '/bin/zsh');
   const startCwd = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
   // GUI 启动的 app 不继承 shell 的 locale，zsh 会把中文路径按字节转义成 \M-^@ 乱码 → 兜底 UTF-8
   const env = { ...process.env, TERM: 'xterm-256color', FANBOX: '1' };
-  if (!/UTF-8/i.test(env.LC_ALL || env.LC_CTYPE || env.LANG || '')) env.LANG = 'zh_CN.UTF-8';
+  if (!isWin && !/UTF-8/i.test(env.LC_ALL || env.LC_CTYPE || env.LANG || '')) env.LANG = 'zh_CN.UTF-8';
   let p;
   try {
     p = pty.spawn(shellPath, [], {
@@ -184,6 +218,14 @@ ipcMain.handle('clip:image', (e, { path: p }) => {
 });
 ipcMain.handle('clip:file', (e, { path: p }) => new Promise((resolve) => {
   const { execFile } = require('child_process');
+  if (process.platform === 'win32') {
+    // 路径走环境变量传入 PowerShell，避免拼字符串被注入；Set-Clipboard 后资源管理器可直接粘贴
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Set-Clipboard -LiteralPath $env:FANBOX_CLIP_PATH'], {
+      env: { ...process.env, FANBOX_CLIP_PATH: p }, windowsHide: true,
+    }, (err) => resolve({ ok: !err, error: err && err.message }));
+    return;
+  }
+  if (process.platform !== 'darwin') return resolve({ ok: false, error: '该平台暂不支持复制文件本体' });
   // argv 传路径，避免拼进 AppleScript 字面量被注入
   execFile('osascript', ['-e', 'on run argv', '-e', 'set the clipboard to (POSIX file (item 1 of argv))', '-e', 'end run', p], (err) => resolve({ ok: !err, error: err && err.message }));
 }));
@@ -209,6 +251,8 @@ ipcMain.on('pty:kill', (e, { id }) => { const p = terminals.get(id); if (p) { tr
 ipcMain.handle('pty:cwd', (e, { id }) => new Promise((resolve) => {
   const p = terminals.get(id);
   if (!p || !p.pid) return resolve({ ok: false });
+  // lsof 是 macOS/Linux 工具；Windows 没有等价的轻量方案，优雅降级（前端会回退到浏览目录）
+  if (process.platform === 'win32') return resolve({ ok: false });
   const { exec } = require('child_process');
   exec(`lsof -a -p ${p.pid} -d cwd -Fn`, (err, stdout) => {
     if (err) return resolve({ ok: false });

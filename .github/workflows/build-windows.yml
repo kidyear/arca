@@ -1,0 +1,48 @@
+name: Build Windows Installer
+
+# 两种触发方式：
+# 1. 手动：GitHub 仓库页 → Actions → Build Windows Installer → Run workflow
+# 2. 打 tag：git tag v1.4.0-win.1 && git push --tags
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # node-pty 是原生模块，必须针对 Electron 的 ABI 在 Windows 上重新编译
+      # （windows-latest 自带 VS Build Tools + Python，node-gyp 开箱即用）
+      - name: Rebuild node-pty for Electron
+        run: npx electron-rebuild -f -w node-pty
+
+      - name: Build NSIS installer
+        run: npx electron-builder --win --publish never
+        env:
+          # 不签名：内部分发版。要消除 SmartScreen 提示再配企业代码签名证书
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FanBox-Windows-Setup
+          path: dist/FanBox-Setup-*.exe
+          if-no-files-found: error
+
+      # 打 tag 触发时顺手发成 GitHub Release，员工直接从 Releases 页下载
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/FanBox-Setup-*.exe

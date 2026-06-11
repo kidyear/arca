@@ -353,6 +353,11 @@ async function contentSearch(query, rootPath) {
   const root = resolvePath(rootPath);
   const q = (query || '').trim();
   if (!q || q.length < 2) return { results: [] };
+  // Spotlight 只有 macOS 有，其它平台直接走纯 Node 的 grep 实现
+  if (PLATFORM !== 'darwin') {
+    const fb = await grepFiles(query, rootPath);
+    return { ...fb, engine: 'grep' };
+  }
   // 属性查询而非自由文本：CJK 子串匹配更稳；[cd] = 忽略大小写/音调
   const esc = q.replace(/[\\"*]/g, '');
   const paths = await mdfind(['-onlyin', root, `(kMDItemTextContent == "*${esc}*"cd) || (kMDItemDisplayName == "*${esc}*"cd)`]);
@@ -645,6 +650,11 @@ function defaultRoots() {
     ['代码 / Code', path.join(HOME, 'Code')],
     ['项目 / Projects', path.join(HOME, 'Projects')],
     ['Developer', path.join(HOME, 'Developer')],
+    // Windows 企业机常见：桌面/文档被重定向进 OneDrive
+    ['桌面 (OneDrive)', path.join(HOME, 'OneDrive', 'Desktop')],
+    ['文档 (OneDrive)', path.join(HOME, 'OneDrive', 'Documents')],
+    ['桌面 (OneDrive)', path.join(HOME, 'OneDrive', '桌面')],
+    ['文档 (OneDrive)', path.join(HOME, 'OneDrive', '文档')],
   ];
   return candidates
     .filter(([, p]) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } })
@@ -671,12 +681,49 @@ async function serveStatic(req, res, urlPath) {
 // ---------- 缩略图（性能关键：不再把原图/原视频整文件当缩略图）----------
 const THUMB_IMG_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'avif']);
 const thumbInflight = new Map(); // cacheFile -> Promise，去重并发生成
-function run(cmd, args) {
-  return new Promise((resolve, reject) => execFile(cmd, args, { timeout: 15000 }, (e) => (e ? reject(e) : resolve())));
+function run(cmd, args, opts) {
+  return new Promise((resolve, reject) => execFile(cmd, args, { timeout: 15000, ...opts }, (e) => (e ? reject(e) : resolve())));
 }
-// 图片走 sips 缩放（快）；视频/PDF/其它走 qlmanage QuickLook 抽帧
+// Windows：PowerShell + System.Drawing 缩图（系统自带，零依赖）。
+// 路径走环境变量传入，不拼进脚本字符串——中文/空格/引号文件名都安全。
+// System.Drawing 不认 webp/heic/avif，FromFile 抛错 → 上层 415 → 前端回退矢量图标。
+const PS_THUMB_SCRIPT = `
+$ErrorActionPreference='Stop'
+Add-Type -AssemblyName System.Drawing
+$img=[System.Drawing.Image]::FromFile($env:FANBOX_THUMB_SRC)
+try {
+  if ($img.PropertyIdList -contains 274) {
+    switch ($img.GetPropertyItem(274).Value[0]) {
+      3 { $img.RotateFlip('Rotate180FlipNone') }
+      6 { $img.RotateFlip('Rotate90FlipNone') }
+      8 { $img.RotateFlip('Rotate270FlipNone') }
+    }
+  }
+  $max=[int]$env:FANBOX_THUMB_SIZE
+  $r=[Math]::Min(1.0,[Math]::Min($max/$img.Width,$max/$img.Height))
+  $w=[Math]::Max(1,[int]($img.Width*$r)); $h=[Math]::Max(1,[int]($img.Height*$r))
+  $bmp=New-Object System.Drawing.Bitmap($w,$h)
+  $g=[System.Drawing.Graphics]::FromImage($bmp)
+  $g.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $g.DrawImage($img,0,0,$w,$h); $g.Dispose()
+  $codec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+  $ep=New-Object System.Drawing.Imaging.EncoderParameters(1)
+  $ep.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality,[long]82)
+  $bmp.Save($env:FANBOX_THUMB_DST,$codec,$ep); $bmp.Dispose()
+} finally { $img.Dispose() }
+`;
+// macOS：图片走 sips 缩放（快）；视频/PDF/其它走 qlmanage QuickLook 抽帧。
+// Windows：图片走 System.Drawing；视频/PDF 无系统级抽帧工具，直接抛错走图标回退。
 async function generateThumb(src, e, size, cacheFile, isImg) {
   await fsp.mkdir(THUMB_DIR, { recursive: true });
+  if (PLATFORM === 'win32') {
+    if (!isImg) throw new Error('no thumb backend on win32');
+    await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_THUMB_SCRIPT], {
+      env: { ...process.env, FANBOX_THUMB_SRC: src, FANBOX_THUMB_DST: cacheFile, FANBOX_THUMB_SIZE: String(size) },
+      windowsHide: true,
+    });
+    return;
+  }
   if (isImg) {
     await run('sips', ['-s', 'format', 'jpeg', '-Z', String(size), src, '--out', cacheFile]);
     return;
@@ -795,13 +842,27 @@ function hostAllowed(req) {
   return ALLOWED_HOSTS.has(host);
 }
 
+// ---------- AI 对话面板（/api/ai/*）：多家模型接入 + 文件工具 agent 循环，见 ai.js ----------
+const ai = require('./ai.js')({ HOME, PLATFORM, readConfig, updateConfig, resolvePath, searchFiles, grepFiles });
+
+// 挡跨站请求伪造（CSRF，回灌自上游 ffc450c）：text/plain 的 POST 是「简单请求」不触发预检，
+// 仅靠 Host 校验拦不住——任意网页都能 fetch 本机 POST 偷偷改文件/触发 AI 操作。
+// 浏览器强制带的 Origin 头 JS 改不了：非回环 origin 一律拒；无 Origin（同源 GET / curl）放行。
+function originAllowed(req) {
+  const o = req.headers.origin;
+  if (!o) return true;
+  try { return ALLOWED_HOSTS.has(new URL(o).hostname); } catch { return false; }
+}
+
 const server = http.createServer(async (req, res) => {
   if (!hostAllowed(req)) { res.writeHead(403); res.end('forbidden host'); return; }
+  if (req.method === 'POST' && !originAllowed(req)) { res.writeHead(403); res.end('forbidden origin'); return; }
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
   const qp = url.searchParams;
 
   try {
+    if (p.startsWith('/api/ai/')) { if (await ai.handle(req, res, url)) return; }
     if (p === '/api/roots') {
       return sendJSON(res, 200, { home: HOME, platform: PLATFORM, sep: path.sep, roots: defaultRoots() });
     }
@@ -819,7 +880,10 @@ const server = http.createServer(async (req, res) => {
     // 都能按所在目录正确解析——srcdoc 方案没有 base URL，这些全是裂的。
     // 暴露面与 /api/raw 等价（都接受任意绝对路径），且同样只对本机回环开放。
     if (p.startsWith('/fs/')) {
-      return serveRaw(req, res, decodeURIComponent(p.slice(3)));
+      let fsPath = decodeURIComponent(p.slice(3));
+      // Windows 绝对路径在 URL 里长成 /C:/Users/...，去掉盘符前的斜杠才是合法磁盘路径
+      if (PLATFORM === 'win32') fsPath = fsPath.replace(/^\/+(?=[A-Za-z]:)/, '');
+      return serveRaw(req, res, fsPath);
     }
     if (p === '/api/thumb') {
       return serveThumb(req, res, qp.get('path'), parseInt(qp.get('w') || '240', 10));

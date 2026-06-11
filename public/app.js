@@ -213,9 +213,12 @@ function fmtTime(ms) {
   if (diff < 604800000) return `${Math.floor(diff / 86400000)} 天前`;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-// 跨平台路径处理：用服务端返回的分隔符
-function dirOf(p) { const i = p.lastIndexOf(state.sep); return i > 0 ? p.slice(0, i) : p; }
-function baseOf(p) { const parts = p.split(state.sep).filter(Boolean); return parts[parts.length - 1] || p; }
+// 快捷键修饰键标签：mac 显示 ⌘，Windows/Linux 显示 Ctrl+（按键监听本来就同时认 metaKey/ctrlKey）
+const IS_MAC = window.fanboxEnv && window.fanboxEnv.platform ? window.fanboxEnv.platform === 'darwin' : /Mac/i.test(navigator.platform);
+const MOD = IS_MAC ? '⌘' : 'Ctrl+';
+// 跨平台路径处理：同时兼容 / 和 \（Windows 的 fs.watch、终端输出都给反斜杠）
+function dirOf(p) { const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')); return i > 0 ? p.slice(0, i) : p; }
+function baseOf(p) { const parts = p.split(/[\\/]/).filter(Boolean); return parts[parts.length - 1] || p; }
 function tilde(p) { return state.home && p.startsWith(state.home) ? '~' + p.slice(state.home.length) : p; }
 function isFav(path) { return state.favorites.some((f) => f.path === path); }
 function toast(msg, isErr) {
@@ -562,7 +565,7 @@ function csvTable(text, delim) {
 }
 // 把绝对路径编码成 /fs/ 端点 URL，逐段 encode 以保留目录层级（相对引用按段解析）
 function fsUrl(p, mtime) {
-  return '/fs/' + p.split('/').filter(Boolean).map(encodeURIComponent).join('/') + '?v=' + (mtime || 0);
+  return '/fs/' + p.split(/[\\/]/).filter(Boolean).map(encodeURIComponent).join('/') + '?v=' + (mtime || 0);
 }
 function renderHtmlPreview(data, meta) {
   const body = $('#preview-body');
@@ -853,7 +856,7 @@ function buildImageEditor(e, img) {
       </div>
       <input type="color" id="ie-color" value="#ff3b30" title="颜色">
       <span class="ie-thick" title="粗细"><input type="range" id="ie-size" min="1" max="60" value="5"><i id="ie-dot"></i></span>
-      <button id="ie-undo" class="ghost-btn" title="撤销 ⌘Z">撤销</button>
+      <button id="ie-undo" class="ghost-btn" title="撤销 ${MOD}Z">撤销</button>
     </div>
     <div class="imgedit-canvas-wrap"><canvas id="ie-canvas"></canvas></div>
     <div class="imgedit-export">
@@ -1040,7 +1043,7 @@ async function enterEditMode(e) {
   let getValue, baseline = ''; // baseline：编辑器内的「已保存基准」，用于未保存守卫
   const leave = async () => {
     if (getValue && getValue() !== baseline) {
-      const ok = await confirmDialog('有未保存的改动，放弃并退出？（保存请点取消后按 ⌘S）');
+      const ok = await confirmDialog(`有未保存的改动，放弃并退出？（保存请点取消后按 ${MOD}S）`);
       if (!ok) return;
     }
     dirtyCheck = null; // 已在此确认过，避免 openPreview 的守卫再问一次
@@ -1065,7 +1068,7 @@ async function enterEditMode(e) {
   if (await mona.load()) {
     const monaco = window.monaco;
     body.innerHTML =
-      `<div class="editor-bar"><button id="ed-save" class="primary">保存</button><button id="ed-cancel" class="ghost-btn">完成</button><span class="editor-hint">⌘S 保存 · ⌘F 查找 · Esc 完成</span></div>` +
+      `<div class="editor-bar"><button id="ed-save" class="primary">保存</button><button id="ed-cancel" class="ghost-btn">完成</button><span class="editor-hint">${MOD}S 保存 · ${MOD}F 查找 · Esc 完成</span></div>` +
       `<div id="ed-host" class="mona-host"></div>`;
     const ed = monaco.editor.create($('#ed-host'), {
       value: data.content || '', language: mona.lang(ex), theme: mona.themeName(),
@@ -1082,7 +1085,7 @@ async function enterEditMode(e) {
     setTimeout(() => ed.focus(), 0);
   } else {
     body.innerHTML =
-      `<div class="editor-bar"><button id="ed-save" class="primary">保存</button><button id="ed-cancel" class="ghost-btn">完成</button><span class="editor-hint">⌘S 保存 · Esc 完成</span></div>` +
+      `<div class="editor-bar"><button id="ed-save" class="primary">保存</button><button id="ed-cancel" class="ghost-btn">完成</button><span class="editor-hint">${MOD}S 保存 · Esc 完成</span></div>` +
       `<textarea id="ed-host" class="editor-area" spellcheck="false"></textarea>`;
     const ta = $('#ed-host');
     ta.value = data.content || '';
@@ -1134,7 +1137,7 @@ async function mdEditor(e, data, mode = 'rich') {
     mode = m;
     mona.disposeIfAny(); crepe.disposeIfAny();
     body.innerHTML =
-      `<div class="editor-bar"><button id="md-mode" class="ghost-btn">${m === 'rich' ? '源码' : '富文本'}</button><span id="md-status" class="editor-hint">自动保存 · ⌘S 立即保存</span></div>` +
+      `<div class="editor-bar"><button id="md-mode" class="ghost-btn">${m === 'rich' ? '源码' : '富文本'}</button><span id="md-status" class="editor-hint">自动保存 · ${MOD}S 立即保存</span></div>` +
       `<div id="ed-host" class="${m === 'rich' ? 'crepe-host' : 'mona-host'}"></div>`;
     $('#md-mode').onclick = async () => {
       await flush();
@@ -1478,7 +1481,7 @@ function maybeShowGuide() {
     <h2>欢迎用翻箱 FanBox</h2>
     <p>vibe coding 的驾驶舱——找文件、跑 agent、看它改、随手改，都在一个窗口：</p>
     <ul>
-      <li><b>⌘K</b> 全局搜文件和文件夹；<b>⌘↵</b> 把项目直接在编辑器整包打开；<code>内容:关键词</code> 搜文件里的字</li>
+      <li><b>${MOD}K</b> 全局搜文件和文件夹；<b>${MOD}↵</b> 把项目直接在编辑器整包打开；<code>内容:关键词</code> 搜文件里的字</li>
       <li>顶部 <b>终端</b> 按钮开内嵌终端跑 Claude Code 等 agent；<b>把文件/文件夹拖进终端</b> 即插入路径喂给它当上下文</li>
       <li><b>单击</b> 预览，<b>双击</b> 系统打开；预览里 <b>编辑</b> md 走所见即所得、<b>编辑图片</b> 可标注/打码/转格式</li>
       <li>agent 改了哪些文件，列表实时高亮「改·N」，不用切窗口盯着看</li>
@@ -1599,12 +1602,14 @@ function bindEvents() {
   // 拖拽文件/文件夹到终端 → 插入路径
   const tp = $('#terminal-panel');
   tp.addEventListener('dragover', (ev) => {
+    if (tp.classList.contains('chat-mode')) return; // 对话模式的拖放由 chat 自己处理（变附件）
     const t = ev.dataTransfer.types;
     if (!t.includes('Files') && !t.includes('application/x-fanbox-path') && !t.includes('text/plain')) return;
     ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; tp.classList.add('term-drop');
   });
   tp.addEventListener('dragleave', (ev) => { if (!tp.contains(ev.relatedTarget)) tp.classList.remove('term-drop'); });
   tp.addEventListener('drop', async (ev) => {
+    if (tp.classList.contains('chat-mode')) return;
     ev.preventDefault(); tp.classList.remove('term-drop');
     // 系统拖入（Finder 文件 / 截图浮窗缩略图）：有真实路径直接用；file-promise 没路径就落盘临时目录
     const files = ev.dataTransfer.files ? [...ev.dataTransfer.files] : [];
@@ -1750,6 +1755,7 @@ const term = {
   open() {
     $('#terminal-panel').classList.remove('hidden');
     $('#terminal-resizer').classList.remove('hidden');
+    setDockMode('term');
     this.applyDock();
     if (!this.sessions.length) this.newTab();
     else this.fitActive();
@@ -1840,11 +1846,13 @@ const term = {
     let p = String(raw).replace(/^['"]+/, '').replace(/[)\]'"`,:;]+$/, '');
     let cwd = state.cwd;
     let candidate = p;
-    if (!p.startsWith('/') && !p.startsWith('~')) {
+    // 绝对路径：/、~、以及 Windows 盘符 C:\ 或 C:/
+    const isAbs = p.startsWith('/') || p.startsWith('~') || /^[A-Za-z]:[\\/]/.test(p);
+    if (!isAbs) {
       try { const r = await window.fanboxPty.cwd(id); if (r && r.ok && r.cwd) cwd = r.cwd; } catch { /* */ }
-      candidate = (cwd || '').replace(/\/$/, '') + '/' + p.replace(/^\.\//, '');
+      candidate = (cwd || '').replace(/[\\/]+$/, '') + state.sep + p.replace(/^\.[\\/]/, '');
     }
-    const name = p.split('/').pop();
+    const name = p.split(/[\\/]/).pop();
     const q = encodeURIComponent;
     const r = await api(`/api/locate?path=${q(candidate)}&name=${q(name)}&root=${q(cwd || state.home)}&tail=${q(tail || '')}`);
     if (!r.found) { toast('没找到「' + name + '」', true); return; }
@@ -1959,8 +1967,18 @@ const term = {
           const reQ = /'([^']{3,})'|"([^"]{3,})"/g;
           while ((m = reQ.exec(t)) !== null) {
             const inner = m[1] || m[2];
-            if (!inner.includes('/') && !/\.[A-Za-z0-9]{1,8}$/.test(inner)) continue;
+            if (!inner.includes('/') && !inner.includes('\\') && !/\.[A-Za-z0-9]{1,8}$/.test(inner)) continue;
             push(m.index + 1, m.index + 1 + inner.length, inner, '');
+          }
+          // 1b. Windows 盘符路径：C:\Users\… 或 C:/Users/…（仅 Windows 启用，避免别的平台误报）
+          if (state.platform === 'win32') {
+            const reWin = /(?<![\w])[A-Za-z]:[\\/][^\s'"`()|<>]+/g;
+            while ((m = reWin.exec(t)) !== null) {
+              const raw = m[0].replace(/[)\],.:;。，]+$/, '');
+              if (raw.length < 4) continue;
+              const tail = t.slice(m.index + raw.length).split(/['"`]/)[0].slice(0, 160);
+              push(m.index, m.index + raw.length, raw, tail);
+            }
           }
           // 2. 斜杠路径：高亮保守断在空格；点击时把行尾余文交给服务端做空格扩展 stat 验证
           //（macOS 截屏「截屏2026-06-10 15.37.43.png」这类带空格文件名靠这步补全）
@@ -2175,19 +2193,20 @@ const crepe = {
 
 // ---------- 变更收件箱（本会话 agent 改了哪些文件，可回看 / 看 diff）----------
 // 构建/依赖目录 + macOS 系统噪声目录（Library/缓存/废纸篓 后台无时无刻在写，不是 agent 干活，必须过滤）
-const CHANGE_IGNORE = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.cache', '.venv', 'venv', '__pycache__', '.DS_Store', 'target', '.turbo', '.expo', 'Library', 'Caches', '.Trash', 'CloudStorage', '.cocoapods', 'DerivedData']);
+const CHANGE_IGNORE = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.cache', '.venv', 'venv', '__pycache__', '.DS_Store', 'target', '.turbo', '.expo', 'Library', 'Caches', '.Trash', 'CloudStorage', '.cocoapods', 'DerivedData', 'AppData', '$RECYCLE.BIN', 'System Volume Information']);
 // 这次变更是不是该被忽略的系统/构建噪声（高亮、刷新、收件箱共用一套判断）
 function isNoisyChange(filename) {
-  const segs = String(filename).split('/');
+  const segs = String(filename).split(/[\\/]/);
   if (segs.some((s) => CHANGE_IGNORE.has(s))) return true;
   const name = segs[segs.length - 1];
-  return !name || name === '.DS_Store' || name.endsWith('~') || name.endsWith('.swp') || name.startsWith('.com.apple.');
+  return !name || name === '.DS_Store' || name === 'Thumbs.db' || name === 'desktop.ini' || name.startsWith('NTUSER.')
+    || name.endsWith('~') || name.endsWith('.swp') || name.startsWith('.com.apple.');
 }
 function recordChange(dir, filename) {
   if (isNoisyChange(filename)) return; // 过滤构建/依赖/系统噪声
-  const segs = filename.split('/');
+  const segs = filename.split(/[\\/]/);
   const name = segs[segs.length - 1];
-  const full = dir.replace(/\/$/, '') + '/' + filename;
+  const full = dir.replace(/[\\/]+$/, '') + state.sep + filename;
   const now = Date.now();
   state.changeTimeline.push({ path: full, name, ts: now }); // 每次写入都记一笔，供会话回放
   if (state.changeTimeline.length > 3000) state.changeTimeline.shift();
@@ -2425,10 +2444,433 @@ if (window.fanboxFs) {
   });
 }
 
+// ---------- AI 对话面板 ----------
+// 终端的「无门槛替身」：右侧 dock 在 对话/终端 两种模式间切换。
+// 对话模式走 /api/ai/* 后端（多家模型 + 文件工具 agent 循环），网页版没有内嵌终端时也可用。
+function setDockMode(mode) {
+  const panel = $('#terminal-panel');
+  const isChat = mode === 'chat';
+  panel.classList.toggle('chat-mode', isChat);
+  $('#mode-chat').classList.toggle('on', isChat);
+  $('#mode-term').classList.toggle('on', !isChat);
+  localStorage.setItem('fb_dock_mode', mode);
+  if (isChat) setTimeout(() => $('#chat-input').focus(), 60);
+  else term.fitActive();
+}
+
+// Claude Code 引擎的工具集 → 给非技术用户看的中文标签
+const AI_TOOL_LABEL = {
+  Read: '读取文件', Write: '写入文件', Edit: '修改文件', MultiEdit: '批量修改',
+  Bash: '执行命令', Glob: '查找文件', Grep: '搜索内容', WebSearch: '联网搜索',
+  WebFetch: '抓取网页', Task: '派出子任务', TodoWrite: '整理待办', NotebookEdit: '编辑笔记本',
+};
+function aiToolDetail(name, args) {
+  const a = args || {};
+  return String(a.file_path || a.path || a.command || a.pattern || a.query || a.url || a.description || a.prompt || '').slice(0, 140);
+}
+function aiApprovalDetail(name, args) {
+  const a = args || {};
+  if (name === 'Write') return `${a.file_path || ''}\n────────\n${String(a.content || '').slice(0, 800)}${String(a.content || '').length > 800 ? '\n…' : ''}`;
+  if (name === 'Edit' || name === 'MultiEdit') return `${a.file_path || ''}\n────────\n替换：${String(a.old_string || '(批量)').slice(0, 300)}\n改为：${String(a.new_string || '').slice(0, 300)}`;
+  if (name === 'Bash') return a.command || '';
+  return JSON.stringify(a).slice(0, 500);
+}
+
+const chat = {
+  currentChat: null, // 当前会话 id（对应左侧列表项）；null = 下一句话开新会话
+  chats: [],
+  attachments: [],
+  busy: false,
+  open() {
+    $('#terminal-panel').classList.remove('hidden');
+    $('#terminal-resizer').classList.remove('hidden');
+    term.applyDock();
+    setDockMode('chat');
+    localStorage.setItem('fb_term_open', '1');
+    this.refreshModelLabel();
+    this.loadChats();
+  },
+  toggle() {
+    const panel = $('#terminal-panel');
+    const openAndChat = !panel.classList.contains('hidden') && panel.classList.contains('chat-mode');
+    if (openAndChat) term.close(); else this.open();
+  },
+  scroll() { const m = $('#chat-msgs'); m.scrollTop = m.scrollHeight; },
+  msgEl(cls) {
+    const empty = $('#chat-empty'); if (empty) empty.classList.add('hidden');
+    const d = document.createElement('div');
+    d.className = 'chat-msg ' + cls;
+    $('#chat-msgs').appendChild(d);
+    this.scroll();
+    return d;
+  },
+  addAttachment(p) {
+    if (!p || this.attachments.includes(p)) return;
+    this.attachments.push(p);
+    this.renderChips();
+  },
+  renderChips() {
+    const box = $('#chat-chips');
+    box.classList.toggle('hidden', !this.attachments.length);
+    box.innerHTML = '';
+    this.attachments.forEach((p, i) => {
+      const c = document.createElement('span');
+      c.className = 'chat-chip';
+      c.innerHTML = `📎 ${escapeHtml(baseOf(p))} <i title="移除">✕</i>`;
+      c.title = p;
+      c.querySelector('i').onclick = () => { this.attachments.splice(i, 1); this.renderChips(); };
+      box.appendChild(c);
+    });
+  },
+  async refreshModelLabel() {
+    try {
+      const r = await api('/api/ai/providers');
+      const a = r.providers[r.active];
+      $('#chat-model').textContent = a ? `${a.label} · ${a.model}${a.hasKey ? '' : '（未配 key）'}` : '';
+    } catch { /* */ }
+  },
+  // ---------- 会话列表（左栏）----------
+  async loadChats() {
+    try { this.chats = (await api('/api/ai/chats')).chats || []; } catch { this.chats = []; }
+    this.renderChatList();
+  },
+  renderChatList() {
+    const list = $('#chat-list');
+    list.innerHTML = '';
+    for (const c of this.chats) {
+      const row = document.createElement('div');
+      row.className = 'chat-item' + (c.id === this.currentChat ? ' sel' : '');
+      row.innerHTML = `<span class="ci-title">${escapeHtml(c.title || '未命名')}</span><span class="ci-sub">${escapeHtml(tilde(c.cwd || ''))}</span><button class="ci-del" title="删除会话">✕</button>`;
+      row.onclick = () => this.openChat(c.id);
+      row.querySelector('.ci-del').onclick = async (e) => {
+        e.stopPropagation();
+        await fetch('/api/ai/chat-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) }).catch(() => {});
+        if (this.currentChat === c.id) this.newChat();
+        this.loadChats();
+      };
+      list.appendChild(row);
+    }
+  },
+  // 打开旧会话：回显引擎侧的历史消息，后续发言自动续聊（resume）
+  async openChat(id) {
+    if (this.busy) { toast('等当前回合结束再切换会话', true); return; }
+    this.currentChat = id;
+    this.renderChatList();
+    const box = $('#chat-msgs');
+    box.innerHTML = '';
+    let r;
+    try { r = await api(`/api/ai/chat-history?id=${encodeURIComponent(id)}`); } catch { r = { messages: [] }; }
+    if (!r.messages.length) {
+      box.innerHTML = '<div class="chat-empty"><p>已接上这个会话的上下文，直接继续说就行。</p></div>';
+      return;
+    }
+    for (const m of r.messages) {
+      if (m.role === 'user') { const u = this.msgEl('user'); u.textContent = m.text; }
+      else if (m.role === 'assistant') {
+        const a = this.msgEl('assistant');
+        const md = document.createElement('div');
+        md.className = 'md-body chat-md';
+        md.innerHTML = window.marked && !window.__noMarked ? window.marked.parse(m.text) : escapeHtml(m.text);
+        a.appendChild(md);
+      } else if (m.role === 'tool') {
+        const a = box.lastElementChild && box.lastElementChild.classList.contains('assistant') ? box.lastElementChild : this.msgEl('assistant');
+        const line = document.createElement('div');
+        line.className = 'chat-tool';
+        line.innerHTML = `<span class="ct-ok">✓</span> ${AI_TOOL_LABEL[m.name] || escapeHtml(m.name)} <code>${escapeHtml(m.detail || '')}</code>`;
+        a.appendChild(line);
+      }
+    }
+    this.scroll();
+  },
+  newChat() {
+    this.currentChat = null;
+    this.renderChatList();
+    $('#chat-msgs').innerHTML = '<div class="chat-empty"><p>新对话。这次对话会绑定当前浏览的目录：' + escapeHtml(tilde(state.cwd || '~')) + '</p></div>';
+    $('#chat-input').focus();
+  },
+  setBusy(b) {
+    this.busy = b;
+    $('#chat-send').disabled = b;
+    $('#chat-stop').classList.toggle('hidden', !b);
+  },
+  async send() {
+    if (this.busy) return;
+    const input = $('#chat-input');
+    const text = input.value.trim();
+    if (!text && !this.attachments.length) return;
+    const payload = { chatId: this.currentChat, text, attachments: this.attachments.slice(), cwd: state.cwd };
+    // 用户气泡（附件名一并显示）
+    const u = this.msgEl('user');
+    u.textContent = text;
+    if (payload.attachments.length) {
+      const at = document.createElement('div');
+      at.className = 'chat-user-atts';
+      at.textContent = '📎 ' + payload.attachments.map(baseOf).join('、');
+      u.appendChild(at);
+    }
+    input.value = '';
+    this.attachments = [];
+    this.renderChips();
+    this.setBusy(true);
+
+    // 助手回合容器：text/工具状态/审批卡片按到达顺序追加；文本按段落用 marked 渲染
+    const a = this.msgEl('assistant');
+    let mdBuf = '', mdDiv = null, thinkBox = null, renderTimer = null;
+    const renderMd = () => {
+      renderTimer = null;
+      if (!mdBuf) return;
+      if (!mdDiv) { mdDiv = document.createElement('div'); mdDiv.className = 'md-body chat-md'; a.appendChild(mdDiv); }
+      mdDiv.innerHTML = window.marked && !window.__noMarked ? window.marked.parse(mdBuf) : escapeHtml(mdBuf);
+      this.scroll();
+    };
+    const endSegment = () => { if (renderTimer) { clearTimeout(renderTimer); renderMd(); } mdBuf = ''; mdDiv = null; };
+    const toolLines = [];
+    const onEvent = (ev) => {
+      if (ev.type === 'chat') { this.currentChat = ev.id; return; }
+      if (ev.type === 'meta') { $('#chat-model').textContent = `${ev.provider} · ${ev.model}`; return; }
+      if (ev.type === 'done') {
+        if (ev.cost > 0) {
+          const c = document.createElement('div');
+          c.className = 'chat-cost';
+          c.textContent = `本轮 $${ev.cost.toFixed(4)}${ev.turns ? ` · ${ev.turns} 步` : ''}`;
+          a.appendChild(c);
+        }
+        return;
+      }
+      if (ev.type === 'think') {
+        if (!thinkBox) {
+          thinkBox = document.createElement('details');
+          thinkBox.className = 'chat-think';
+          thinkBox.innerHTML = '<summary>思考过程</summary><pre></pre>';
+          a.appendChild(thinkBox);
+        }
+        thinkBox.querySelector('pre').textContent += ev.delta;
+        return;
+      }
+      if (ev.type === 'text') {
+        mdBuf += ev.delta;
+        if (!renderTimer) renderTimer = setTimeout(renderMd, 80);
+        return;
+      }
+      if (ev.type === 'tool') {
+        endSegment();
+        const line = document.createElement('div');
+        line.className = 'chat-tool';
+        line.innerHTML = `<span class="ct-spin">⏳</span> ${AI_TOOL_LABEL[ev.name] || escapeHtml(ev.name)} <code>${escapeHtml(String(aiToolDetail(ev.name, ev.args)).slice(0, 120))}</code>`;
+        a.appendChild(line);
+        toolLines.push(line);
+        this.scroll();
+        return;
+      }
+      if (ev.type === 'tool_done') {
+        const line = toolLines.find((l) => l.querySelector('.ct-spin'));
+        if (line) { line.querySelector('.ct-spin').outerHTML = '<span class="ct-ok">✓</span>'; }
+        return;
+      }
+      if (ev.type === 'approval') {
+        endSegment();
+        const card = document.createElement('div');
+        card.className = 'chat-approval';
+        const detail = aiApprovalDetail(ev.name, ev.args);
+        card.innerHTML =
+          `<div class="ap-title">AI 请求：${AI_TOOL_LABEL[ev.name] || escapeHtml(ev.name)}</div>` +
+          `<pre class="ap-detail">${escapeHtml(detail)}</pre>` +
+          `<div class="ap-btns"><button class="ap-allow">允许</button><button class="ap-deny">拒绝</button></div>`;
+        const decide = async (ok) => {
+          card.querySelector('.ap-btns').innerHTML = `<span class="ap-state">${ok ? '✓ 已允许' : '✕ 已拒绝'}</span>`;
+          card.classList.add(ok ? 'allowed' : 'denied');
+          try { await fetch('/api/ai/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ev.id, approve: ok }) }); } catch { /* */ }
+        };
+        card.querySelector('.ap-allow').onclick = () => decide(true);
+        card.querySelector('.ap-deny').onclick = () => decide(false);
+        a.appendChild(card);
+        this.scroll();
+        return;
+      }
+      if (ev.type === 'error') {
+        endSegment();
+        const er = document.createElement('div');
+        er.className = 'chat-error';
+        er.textContent = '⚠ ' + ev.message;
+        a.appendChild(er);
+        this.scroll();
+        return;
+      }
+    };
+    try {
+      const res = await fetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (!line.startsWith('data:')) continue;
+          let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
+          onEvent(ev);
+        }
+      }
+    } catch (e) {
+      onEvent({ type: 'error', message: '连接中断: ' + e.message });
+    }
+    endSegment();
+    if (!a.childNodes.length) a.remove(); // 全程没产出（比如配置错误已在 error 行展示过）就别留空气泡
+    this.setBusy(false);
+    this.loadChats(); // 新会话进列表 / 时间戳置顶
+  },
+  stop() {
+    fetch('/api/ai/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: this.currentChat }) }).catch(() => {});
+  },
+  init() {
+    $('#btn-chat').onclick = () => this.toggle();
+    $('#mode-chat').onclick = () => setDockMode('chat');
+    $('#mode-term').onclick = () => {
+      if (!term.available()) { toast('网页版没有内嵌终端，桌面版才有', true); return; }
+      if (!term.sessions.length) term.newTab();
+      setDockMode('term');
+    };
+    $('#chat-send').onclick = () => this.send();
+    $('#chat-stop').onclick = () => this.stop();
+    $('#chat-new').onclick = () => this.newChat();
+    $('#chat-settings').onclick = () => aiSettings.open();
+    const input = $('#chat-input');
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.send(); }
+    });
+    // 拦住面板里的按键，别触发全局快捷键（方向键选文件等）
+    $('#chat-host').addEventListener('keydown', (e) => e.stopPropagation());
+    // 拖文件进对话区 = 附件。内部拖（文件列表）和系统拖（Finder/截图浮窗）都收
+    const host = $('#chat-host');
+    host.addEventListener('dragover', (e) => {
+      const t = e.dataTransfer.types;
+      if (t.includes('Files') || t.includes('application/x-fanbox-path') || t.includes('text/plain')) {
+        e.preventDefault(); e.stopPropagation(); host.classList.add('chat-drop');
+      }
+    });
+    host.addEventListener('dragleave', () => host.classList.remove('chat-drop'));
+    host.addEventListener('drop', async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      host.classList.remove('chat-drop');
+      const files = e.dataTransfer.files ? [...e.dataTransfer.files] : [];
+      if (files.length && window.fanboxDrop) {
+        for (const f of files) {
+          let p = window.fanboxDrop.pathForFile(f);
+          if (!p) {
+            const r = await window.fanboxDrop.saveTemp(f.name, await f.arrayBuffer()).catch(() => null);
+            if (r && r.ok) p = r.path;
+          }
+          if (p) this.addAttachment(p);
+        }
+        return;
+      }
+      const p = e.dataTransfer.getData('application/x-fanbox-path') || e.dataTransfer.getData('text/plain');
+      if (p) this.addAttachment(p);
+    });
+    this.refreshModelLabel();
+  },
+};
+
+// ---------- AI 模型设置弹窗 ----------
+const aiSettings = {
+  data: null, sel: null, modelsCache: {},
+  async open() {
+    try { this.data = await api('/api/ai/providers'); } catch (e) { toast('读取 AI 配置失败: ' + e.message, true); return; }
+    this.sel = this.data.active;
+    this.render();
+    $('#ai-settings').classList.remove('hidden');
+  },
+  close() { $('#ai-settings').classList.add('hidden'); },
+  render() {
+    const list = $('#ai-provider-list');
+    list.innerHTML = '';
+    for (const [k, p] of Object.entries(this.data.providers)) {
+      const row = document.createElement('button');
+      row.className = 'ai-provider' + (k === this.sel ? ' sel' : '');
+      row.innerHTML = `<span>${escapeHtml(p.label)}</span><span class="ai-flags">${p.hasKey ? '<i class="ok">已配 key</i>' : ''}${k === this.data.active ? '<i class="act">使用中</i>' : ''}</span>`;
+      row.onclick = () => { this.sel = k; this.render(); };
+      list.appendChild(row);
+    }
+    const p = this.data.providers[this.sel];
+    $('#ai-key').value = '';
+    $('#ai-key').placeholder = p.hasKey ? '已配置（留空保持不变，粘贴新 key 可替换）' : '粘贴该服务商的 API key';
+    $('#ai-baseurl').value = p.baseUrl || '';
+    $('#ai-model').value = p.model || '';
+    $('#ai-status').textContent = p.note || '';
+    // 预设的建议模型先展示出来；有 key 的服务商自动拉一次实时列表（带缓存，不重复打 API）
+    this.renderModelPick(this.modelsCache[this.sel] || p.models || []);
+    if (p.hasKey && !this.modelsCache[this.sel]) this.fetchModels(true);
+  },
+  // 模型候选渲染成可点的胶囊列表——datalist 会按输入框现有文字过滤，拉到了也看不见，不用它
+  renderModelPick(models) {
+    const box = $('#ai-model-pick');
+    const cur = $('#ai-model').value.trim();
+    box.classList.toggle('hidden', !models.length);
+    box.innerHTML = '';
+    for (const m of models) {
+      const b = document.createElement('button');
+      b.className = 'ai-model-opt' + (m === cur ? ' sel' : '');
+      b.textContent = m;
+      b.onclick = () => { $('#ai-model').value = m; this.renderModelPick(models); };
+      box.appendChild(b);
+    }
+  },
+  async fetchModels(silent) {
+    if (!silent) $('#ai-status').textContent = '拉取中…';
+    try {
+      // 表单里刚填的 key / baseUrl 一并带上：不用先保存就能拉
+      const r = await fetch('/api/ai/models', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: this.sel, apiKey: $('#ai-key').value.trim(), baseUrl: $('#ai-baseurl').value.trim() }),
+      }).then((x) => x.json());
+      if (!r.ok) throw new Error(r.error);
+      this.modelsCache[this.sel] = r.models;
+      this.renderModelPick(r.models);
+      $('#ai-status').textContent = `拉到 ${r.models.length} 个模型，点下方选择`;
+    } catch (e) { if (!silent) $('#ai-status').textContent = '拉取失败: ' + e.message; }
+  },
+  async save() {
+    const body = { provider: this.sel, model: $('#ai-model').value.trim(), baseUrl: $('#ai-baseurl').value.trim(), activate: true };
+    const key = $('#ai-key').value.trim();
+    if (key) body.apiKey = key;
+    try {
+      await fetch('/api/ai/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      toast('AI 配置已保存');
+      this.close();
+      chat.refreshModelLabel();
+    } catch (e) { $('#ai-status').textContent = '保存失败: ' + e.message; }
+  },
+  init() {
+    $('#ai-close').onclick = () => this.close();
+    $('#ai-save').onclick = () => this.save();
+    $('#ai-fetch-models').onclick = () => this.fetchModels();
+    $('#ai-settings').onclick = (e) => { if (e.target.id === 'ai-settings') this.close(); };
+    $('#ai-settings').addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); this.close(); }
+      e.stopPropagation();
+    });
+  },
+};
+
 // ---------- 启动 ----------
 async function init() {
-  // 桌面 app：标记 body，给顶部交通灯留位、顶部可拖拽
-  if (window.fanboxEnv && window.fanboxEnv.isDesktopApp) document.documentElement.classList.add('desktop');
+  // 桌面 app：标记 body，给顶部交通灯留位、顶部可拖拽（交通灯避让仅 mac 需要，按平台打 class）
+  if (window.fanboxEnv && window.fanboxEnv.isDesktopApp) {
+    document.documentElement.classList.add('desktop', 'plat-' + (window.fanboxEnv.platform || 'darwin'));
+  }
+  // 非 mac：把界面静态文案里的 ⌘ 换成 Ctrl+（title 提示和可见文本都换；动态生成的文案用 MOD 常量）
+  if (!IS_MAC) {
+    const fix = (s) => s.replace(/⌘/g, 'Ctrl+');
+    document.querySelectorAll('[title]').forEach((el) => { if (el.title.includes('⌘')) el.title = fix(el.title); });
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let tn;
+    while ((tn = walker.nextNode())) { if (tn.nodeValue.includes('⌘')) tn.nodeValue = fix(tn.nodeValue); }
+  }
   applyTheme(state.theme, false);
   if (state.sidebarCollapsed) { $('#app').classList.add('sidebar-collapsed'); $('#btn-sidebar')?.classList.add('on'); }
   applyLayout();
@@ -2446,22 +2888,26 @@ async function init() {
     const src = decodeURI(img.getAttribute('src') || '');
     if (/^(https?:|data:|blob:)/.test(src) || src.startsWith('/api/') || src.startsWith('/fs/')) return;
     let abs = src;
-    if (!abs.startsWith('/')) {
-      const stack = (state.selected || '').split('/').slice(0, -1);
-      for (const seg of abs.split('/')) {
+    // 相对路径按当前文档所在目录解析；Windows 盘符路径（C:\…）本身就是绝对的
+    if (!abs.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(abs)) {
+      const stack = (state.selected || '').split(/[\\/]/).slice(0, -1);
+      for (const seg of abs.split(/[\\/]/)) {
         if (seg === '..') stack.pop(); else if (seg && seg !== '.') stack.push(seg);
       }
-      abs = '/' + stack.filter(Boolean).join('/');
+      abs = (state.platform === 'win32' ? '' : '/') + stack.filter(Boolean).join('/');
     }
     img.dataset.fsTried = '1';
-    img.src = '/fs' + encodeURI(abs);
+    img.src = '/fs/' + abs.split(/[\\/]/).filter(Boolean).map(encodeURIComponent).join('/');
   }, true);
   document.querySelectorAll('#theme-switch .theme-seg button').forEach((b) => { b.onclick = () => applyTheme(b.dataset.skin); });
   await loadRoots();
   await loadFavorites();
   await navigate(state.home, false);
-  // 恢复上次终端开合状态（dock 方位已由 applyDock 自带记忆）
+  chat.init();
+  aiSettings.init();
+  // 恢复上次终端开合状态（dock 方位已由 applyDock 自带记忆）；上次停在对话模式则恢复对话
   if (localStorage.getItem('fb_term_open') === '1' && term.available()) term.open();
+  if (localStorage.getItem('fb_term_open') === '1' && localStorage.getItem('fb_dock_mode') === 'chat') chat.open();
   maybeShowGuide();
   bindUpdateNotice();
 }
