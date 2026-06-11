@@ -3030,6 +3030,99 @@ function aiApprovalDetail(name, args) {
   return JSON.stringify(a).slice(0, 500);
 }
 
+// ---------- 任务模板：把高频场景封装成「卡片 + 填空」，员工不用写提示词 ----------
+// 模板是数据：~/.fanbox/templates.json（管理员自定义）> 内置 templates.default.json
+const tpl = {
+  data: null,
+  dept: localStorage.getItem('fb_tpl_dept') || '通用',
+  async load() {
+    if (this.data) return this.data;
+    try { this.data = await api('/api/ai/templates'); } catch { this.data = { templates: [] }; }
+    return this.data;
+  },
+  clear() { const el = $('#tpl-area'); if (el) el.remove(); },
+  async showPicker() {
+    await this.load();
+    this.clear();
+    if (!this.data.templates || !this.data.templates.length) return;
+    const box = document.createElement('div');
+    box.id = 'tpl-area';
+    $('#chat-msgs').appendChild(box);
+    this.renderPicker(box);
+  },
+  renderPicker(box) {
+    const has = (d) => this.data.templates.some((t) => t.dept === d);
+    const depts = ['全部', ...(this.data.departments || []).filter(has)];
+    if (!depts.includes(this.dept)) this.dept = depts[1] || '全部';
+    // 选部门 = 该部门专属 + 通用（员工视角两类都用得上）；选「全部」看全部
+    const list = this.data.templates.filter((t) => this.dept === '全部' || t.dept === this.dept || t.dept === '通用');
+    box.innerHTML = '<div class="tpl-head">任务模板 <span class="tpl-sub">选卡片 → 拖文件 → 填一两句 → 开工</span></div>';
+    const chips = document.createElement('div');
+    chips.className = 'tpl-chips';
+    depts.forEach((d) => {
+      const b = document.createElement('button');
+      b.className = 'tpl-chip' + (d === this.dept ? ' on' : '');
+      b.textContent = d;
+      b.onclick = () => { this.dept = d; localStorage.setItem('fb_tpl_dept', d); this.renderPicker(box); };
+      chips.appendChild(b);
+    });
+    box.appendChild(chips);
+    const grid = document.createElement('div');
+    grid.className = 'tpl-grid';
+    list.forEach((t) => {
+      const c = document.createElement('button');
+      c.className = 'tpl-card';
+      c.innerHTML = `<span class="tpl-ico">${t.icon || '📋'}</span><span class="tpl-t">${escapeHtml(t.title)}</span><span class="tpl-d">${escapeHtml(t.desc || '')}</span>`;
+      c.onclick = () => this.renderRunner(box, t);
+      grid.appendChild(c);
+    });
+    box.appendChild(grid);
+    chat.scroll();
+  },
+  renderRunner(box, t) {
+    box.innerHTML = `<div class="tpl-head"><button class="tpl-back">← 返回</button><b>${t.icon || ''} ${escapeHtml(t.title)}</b> <span class="tpl-sub">${escapeHtml(t.desc || '')}</span></div>`;
+    box.querySelector('.tpl-back').onclick = () => this.renderPicker(box);
+    const form = document.createElement('div');
+    form.className = 'tpl-form';
+    if (t.needsFiles || t.filesHint) {
+      const fh = document.createElement('div');
+      fh.className = 'tpl-files';
+      fh.textContent = `📎 ${t.filesHint || '把相关文件拖进对话区作为附件'}${t.needsFiles ? '（必需）' : '（可选）'}`;
+      form.appendChild(fh);
+    }
+    const inputs = {};
+    (t.fields || []).forEach((f) => {
+      const lab = document.createElement('label');
+      lab.className = 'tpl-field';
+      lab.innerHTML = `<span>${escapeHtml(f.label)}${f.optional ? '' : ' *'}</span>`;
+      const inp = document.createElement('input');
+      inp.placeholder = f.placeholder || '';
+      inputs[f.key] = inp;
+      lab.appendChild(inp);
+      form.appendChild(lab);
+    });
+    const go = document.createElement('button');
+    go.className = 'chat-send-btn tpl-go';
+    go.textContent = '开始执行';
+    go.onclick = () => this.run(t, inputs);
+    form.appendChild(go);
+    box.appendChild(form);
+    chat.scroll();
+  },
+  run(t, inputs) {
+    if (t.needsFiles && !chat.attachments.length) { toast('这个模板需要先把文件拖进对话区作为附件', true); return; }
+    const vals = {};
+    for (const f of (t.fields || [])) {
+      const v = (inputs[f.key].value || '').trim();
+      if (!v && !f.optional) { toast(`「${f.label}」需要填写`, true); inputs[f.key].focus(); return; }
+      vals[f.key] = v;
+    }
+    const prompt = t.prompt.replace(/\{(\w+)\}/g, (m, k) => (vals[k] !== undefined ? (vals[k] || '无特别要求') : m));
+    const filled = Object.values(vals).filter(Boolean);
+    chat.send(prompt, `${t.icon || '📋'} ${t.title}${filled.length ? ' · ' + filled.join(' / ') : ''}`);
+  },
+};
+
 const chat = {
   currentChat: null, // 当前会话 id（对应左侧列表项）；null = 下一句话开新会话
   chats: [],
@@ -3043,6 +3136,8 @@ const chat = {
     localStorage.setItem('fb_term_open', '1');
     this.refreshModelLabel();
     this.loadChats();
+    // 没在任何会话里时展示任务模板（卡片不打扰已有对话）
+    if (!this.currentChat && !$('#tpl-area') && !$('#chat-msgs .chat-msg')) tpl.showPicker();
   },
   toggle() {
     const panel = $('#terminal-panel');
@@ -3110,6 +3205,7 @@ const chat = {
     if (this.busy) { toast('等当前回合结束再切换会话', true); return; }
     this.currentChat = id;
     this.renderChatList();
+    tpl.clear();
     const box = $('#chat-msgs');
     box.innerHTML = '';
     let r;
@@ -3140,6 +3236,7 @@ const chat = {
     this.currentChat = null;
     this.renderChatList();
     $('#chat-msgs').innerHTML = '<div class="chat-empty"><p>新对话。这次对话会绑定当前浏览的目录：' + escapeHtml(tilde(state.cwd || '~')) + '</p></div>';
+    tpl.showPicker();
     $('#chat-input').focus();
   },
   setBusy(b) {
@@ -3147,22 +3244,25 @@ const chat = {
     $('#chat-send').disabled = b;
     $('#chat-stop').classList.toggle('hidden', !b);
   },
-  async send() {
+  // forcedText：跳过输入框直接发这段文字（任务模板组装的提示词走这里）
+  // displayText：用户气泡里显示的人话摘要（不给非技术用户看大段提示词）
+  async send(forcedText, displayText) {
     if (this.busy) return;
     const input = $('#chat-input');
-    const text = input.value.trim();
+    const text = (forcedText !== undefined ? forcedText : input.value).trim();
     if (!text && !this.attachments.length) return;
-    const payload = { chatId: this.currentChat, text, attachments: this.attachments.slice(), cwd: state.cwd };
+    tpl.clear(); // 发送时收起模板区
+    const payload = { chatId: this.currentChat, text, title: (displayText || text).slice(0, 40), attachments: this.attachments.slice(), cwd: state.cwd };
     // 用户气泡（附件名一并显示）
     const u = this.msgEl('user');
-    u.textContent = text;
+    u.textContent = displayText || text;
     if (payload.attachments.length) {
       const at = document.createElement('div');
       at.className = 'chat-user-atts';
       at.textContent = '📎 ' + payload.attachments.map(baseOf).join('、');
       u.appendChild(at);
     }
-    input.value = '';
+    if (forcedText === undefined) input.value = '';
     this.attachments = [];
     this.renderChips();
     this.setBusy(true);
@@ -3291,6 +3391,7 @@ const chat = {
     $('#chat-send').onclick = () => this.send();
     $('#chat-stop').onclick = () => this.stop();
     $('#chat-new').onclick = () => this.newChat();
+    $('#chat-tpl').onclick = () => this.newChat(); // 模板挂在新对话的空状态里
     $('#chat-settings').onclick = () => aiSettings.open();
     const input = $('#chat-input');
     input.addEventListener('keydown', (e) => {

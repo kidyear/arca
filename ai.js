@@ -173,6 +173,15 @@ module.exports = function createAI(ctx) {
       sendJSON(res, 200, { ok: true });
       return true;
     }
+    if (p === '/api/ai/templates' && req.method === 'GET') {
+      // 任务模板是数据不是代码：~/.fanbox/templates.json（管理员自定义）优先，内置默认兜底
+      let raw = null, source = 'custom';
+      try { raw = await fsp.readFile(path.join(ctx.HOME, '.fanbox', 'templates.json'), 'utf8'); } catch { /* 用内置 */ }
+      if (raw === null) { source = 'builtin'; try { raw = await fsp.readFile(path.join(__dirname, 'templates.default.json'), 'utf8'); } catch { raw = '{"templates":[]}'; } }
+      try { sendJSON(res, 200, { source, ...JSON.parse(raw) }); }
+      catch (e) { sendJSON(res, 200, { source, templates: [], error: `模板文件解析失败: ${e.message}` }); }
+      return true;
+    }
     if (p === '/api/ai/models' && req.method === 'POST') {
       // Anthropic 兼容端点不一定都实现 /v1/models；拉不到就回落预设列表
       try {
@@ -233,7 +242,7 @@ module.exports = function createAI(ctx) {
 
   // ---------- 对话主流程：一次用户消息 = 一次引擎 query ----------
   async function handleChat(req, res) {
-    const { chatId, text, attachments, cwd } = await readBody(req);
+    const { chatId, text, title, attachments, cwd } = await readBody(req);
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* 客户端断开 */ } };
     let runKey = chatId;
@@ -243,7 +252,7 @@ module.exports = function createAI(ctx) {
       const chats = await readChats();
       let chat = chats.find((c) => c.id === chatId);
       if (!chat) {
-        chat = { id: 'c' + crypto.randomBytes(8).toString('hex'), title: (text || '新对话').slice(0, 40), sessionId: null, cwd: cwd || ctx.HOME, provider: prov.key, model: prov.model, ts: Date.now() };
+        chat = { id: 'c' + crypto.randomBytes(8).toString('hex'), title: (title || text || '新对话').slice(0, 40), sessionId: null, cwd: cwd || ctx.HOME, provider: prov.key, model: prov.model, ts: Date.now() };
         await updateChats((list) => { list.push(chat); return list; });
       }
       send({ type: 'chat', id: chat.id, title: chat.title });
