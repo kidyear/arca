@@ -185,7 +185,7 @@ const state = {
   sort: localStorage.getItem('fb_sort') || 'name',
   showHidden: localStorage.getItem('fb_hidden') === '1',
   filter: '', selected: null, cursor: -1, cols: 1, visible: [],
-  favorites: [], recentOpened: [], recentMode: false,
+  favorites: [], recentOpened: [], recentMode: false, skillsMode: false,
   previewW: Number(localStorage.getItem('fb_preview_w')) || 480,
   previewH: Number(localStorage.getItem('fb_preview_h')) || 340,
   sidebarCollapsed: localStorage.getItem('fb_sidebar_collapsed') === '1',
@@ -266,9 +266,8 @@ async function navigate(p, pushHistory = true) {
     state.breadcrumb = data.breadcrumb;
     state.parent = data.parent;
     state.recentMode = false;
-    state.filter = '';
+    state.skillsMode = false;
     state.cursor = -1;
-    $('#quick-filter').value = '';
     render();
     renderRootsActive();
     // 联动：监听此目录 + 各终端项目目录的文件变化（agent 改文件→自动刷新）；终端跟随则 cd 过去
@@ -299,6 +298,7 @@ function render() {
 function renderBreadcrumb() {
   const bc = $('#breadcrumb');
   bc.innerHTML = '';
+  if (state.skillsMode) { bc.innerHTML = `<span class="crumb last">Skills 透视</span>`; return; }
   if (state.recentMode) { bc.innerHTML = `<span class="crumb last">${ic('clock', 'currentColor', 15)} 最近修改的文件</span>`; return; }
   (state.breadcrumb || []).forEach((c, i, arr) => {
     if (i > 0) { const s = document.createElement('span'); s.className = 'sep'; s.textContent = '›'; bc.appendChild(s); }
@@ -309,6 +309,20 @@ function renderBreadcrumb() {
     el.onclick = () => navigate(c.path);
     bc.appendChild(el);
   });
+  // 项目配对色点：当前浏览目录落在某个终端的项目里 → 末级面包屑挂同款色，和终端标签图标呼应
+  if (typeof term !== 'undefined' && term.sessions.length) {
+    const ts = term.sessions
+      // 排掉 / 和家目录这类浅根：它们 startsWith 任何路径都成立，色点会常亮、配对语义失效
+      .filter((s) => s.cwd && s.cwd !== '/' && s.cwd !== state.home && (state.cwd === s.cwd || (state.cwd || '').startsWith(s.cwd.replace(/\/$/, '') + '/')))
+      .sort((a, b) => b.cwd.length - a.cwd.length)[0];
+    if (ts) {
+      const d = document.createElement('span');
+      d.className = 'crumb-proj';
+      d.style.background = `hsl(${term.hueOf(ts.cwd)} 62% 48%)`;
+      d.title = '终端「' + (ts.title || '') + '」正在这个项目里干活';
+      bc.appendChild(d);
+    }
+  }
   if (state.project) {
     const b = document.createElement('span');
     b.className = 'proj-badge';
@@ -321,7 +335,6 @@ function renderBreadcrumb() {
 function visibleEntries() {
   let list = state.entries.slice();
   if (!state.showHidden) list = list.filter((e) => !e.hidden);
-  if (state.filter) { const f = state.filter.toLowerCase(); list = list.filter((e) => e.name.toLowerCase().includes(f)); }
   const dirFirst = (a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : 0);
   // 最近修改视图：以时间为本义，默认按 mtime 倒序（用户可显式切到大小/名称）
   if (state.recentMode && state.sort === 'name') list.sort((a, b) => b.mtime - a.mtime);
@@ -331,13 +344,12 @@ function visibleEntries() {
   return list;
 }
 function renderFiles() {
+  if (state.skillsMode) return; // skills 视图自管 #file-area，文件渲染不要清掉它
   const area = $('#file-area');
   const list = visibleEntries();
   state.visible = list;
-  const dirs = list.filter((e) => e.isDir).length;
-  $('#dir-meta').textContent = `${dirs} 个文件夹 · ${list.length - dirs} 个文件`;
   if (!list.length) {
-    const emptyMsg = state.recentMode ? (state.filter ? '没有匹配的文件' : '没找到最近修改的文件') : (state.filter ? '没有匹配的文件' : '这个文件夹是空的');
+    const emptyMsg = state.recentMode ? '没找到最近修改的文件' : '这个文件夹是空的';
     const emptyIc = state.recentMode ? 'clock' : 'inbox';
     area.innerHTML = `<div class="empty-state"><div class="big">${ic(emptyIc, 'currentColor', 48)}</div>${emptyMsg}</div>`;
     return;
@@ -992,7 +1004,6 @@ async function copyPath(p) {
 function recordRecent(p) {
   if (!p) return;
   state.recentOpened = [p, ...(state.recentOpened || []).filter((x) => x !== p)].slice(0, 30);
-  renderRecentOpened();
   apiPost('/api/recent-open', { path: p }).catch(() => {});
 }
 async function toggleFav(e) {
@@ -1279,6 +1290,11 @@ function showContextMenu(ev, e) {
   items.push({ label: isFav(e.path) ? '取消收藏' : '收藏', fn: () => toggleFav(e) });
   items.push({ label: '重命名…', fn: () => doRename(e) });
   items.push({ label: '移到废纸篓', danger: true, fn: () => doTrash(e) });
+  popupMenu(ev, items);
+}
+// 在鼠标位置弹一个菜单（右键菜单与空白处双击菜单共用）
+function popupMenu(ev, items) {
+  closeContextMenu();
   const menu = document.createElement('div');
   menu.id = 'context-menu';
   menu.className = 'context-menu';
@@ -1297,6 +1313,41 @@ function showContextMenu(ev, e) {
 }
 
 // ---------- 侧边栏 ----------
+// 侧栏目录树：目录项带展开箭头，点箭头逐级懒加载子目录（只列文件夹），点行本身仍是跳转
+function navDirLi(name, p) {
+  const li = document.createElement('li');
+  li.dataset.path = p;
+  const twirl = document.createElement('span');
+  twirl.className = 'twirl';
+  twirl.textContent = '▸';
+  twirl.title = '展开子文件夹';
+  twirl.onclick = (ev) => { ev.stopPropagation(); toggleNavSub(li, p, twirl); };
+  const ico = document.createElement('span');
+  ico.className = 'ico';
+  ico.innerHTML = svgWrap(SVG.folder, 'currentColor', 16, true);
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = name;
+  label.title = p;
+  li.append(twirl, ico, label);
+  li.onclick = () => navigate(p);
+  makeDraggablePath(li, p);
+  return li;
+}
+async function toggleNavSub(li, dirPath, twirl) {
+  const old = li.nextElementSibling;
+  if (old && old.classList.contains('nav-sub')) { old.remove(); twirl.textContent = '▸'; return; }
+  twirl.textContent = '▾';
+  const ul = document.createElement('ul');
+  ul.className = 'nav-list nav-sub';
+  li.after(ul);
+  try {
+    const data = await api('/api/list?path=' + encodeURIComponent(dirPath));
+    const dirs = (data.entries || []).filter((e) => e.isDir && !e.hidden);
+    if (!dirs.length) { ul.innerHTML = '<div class="nav-empty">没有子文件夹</div>'; return; }
+    dirs.forEach((e) => ul.appendChild(navDirLi(e.name, e.path)));
+  } catch { ul.remove(); twirl.textContent = '▸'; }
+}
 async function loadRoots() {
   const data = await api('/api/roots');
   state.home = data.home;
@@ -1304,14 +1355,7 @@ async function loadRoots() {
   state.sep = data.sep || '/';
   const ul = $('#roots-list');
   ul.innerHTML = '';
-  data.roots.forEach((r) => {
-    const li = document.createElement('li');
-    li.dataset.path = r.path;
-    li.innerHTML = `<span class="ico">${svgWrap(SVG.folder, 'currentColor', 16, true)}</span><span class="label">${r.name}</span>`;
-    li.onclick = () => navigate(r.path);
-    makeDraggablePath(li, r.path);
-    ul.appendChild(li);
-  });
+  data.roots.forEach((r) => ul.appendChild(navDirLi(r.name, r.path)));
 }
 function renderRootsActive() {
   $('#roots-list').querySelectorAll('li').forEach((li) => li.classList.toggle('active', li.dataset.path === state.cwd));
@@ -1321,33 +1365,62 @@ async function loadFavorites() {
   state.favorites = data.favorites || [];
   state.recentOpened = data.recentOpened || [];
   renderFavs();
-  renderRecentOpened();
 }
 function renderFavs() {
   const ul = $('#favs-list');
   ul.innerHTML = '';
   if (!state.favorites.length) { ul.innerHTML = '<div class="nav-empty">悬停文件点 ☆ 即可收藏</div>'; return; }
   state.favorites.forEach((f) => {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="ico">${svgWrap(f.isDir ? SVG.folder : SVG.file, 'currentColor', 16, f.isDir)}</span><span class="label" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span><span class="unfav" title="移除">✕</span>`;
-    li.onclick = (ev) => {
-      if (ev.target.classList.contains('unfav')) { toggleFav(f); return; }
-      if (f.isDir) navigate(f.path);
-      else navigate(dirOf(f.path)).then(() => { const e = state.entries.find((x) => x.path === f.path); if (e) { state.selected = f.path; openPreview(e); renderFiles(); } });
-    };
-    makeDraggablePath(li, f.path);
+    let li;
+    if (f.isDir) {
+      li = navDirLi(f.name, f.path);
+    } else {
+      li = document.createElement('li');
+      li.innerHTML = `<span class="ico">${svgWrap(SVG.file, 'currentColor', 16)}</span><span class="label" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</span>`;
+      li.onclick = () => navigate(dirOf(f.path)).then(() => { const e = state.entries.find((x) => x.path === f.path); if (e) { state.selected = f.path; openPreview(e); renderFiles(); } });
+      makeDraggablePath(li, f.path);
+    }
+    const un = document.createElement('span');
+    un.className = 'unfav';
+    un.title = '移除';
+    un.textContent = '✕';
+    un.onclick = (ev) => { ev.stopPropagation(); toggleFav(f); };
+    li.appendChild(un);
     ul.appendChild(li);
   });
 }
-function renderRecentOpened() {
-  const ul = $('#recent-opened-list');
+// Agent 项目：最近被 Claude Code / Codex 处理过的项目文件夹，从两者的本机会话日志扫出来
+function agoShort(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 2) return '刚刚';
+  if (m < 60) return m + ' 分';
+  if (m < 1440) return Math.round(m / 60) + ' 时';
+  return Math.round(m / 1440) + ' 天';
+}
+async function loadAgentProjects() {
+  let data;
+  try { data = await api('/api/agent-projects'); } catch { return; }
+  const list = (data.projects || []).slice(0, 8);
+  // 数据没变就不动 DOM，免得定时刷新把用户展开的子树抹掉
+  const sig = JSON.stringify(list);
+  if (sig === loadAgentProjects._sig) return;
+  loadAgentProjects._sig = sig;
+  const ul = $('#agent-projects-list');
   ul.innerHTML = '';
-  if (!state.recentOpened.length) { ul.innerHTML = '<div class="nav-empty">打开过的文件会出现在这里</div>'; return; }
-  state.recentOpened.slice(0, 8).forEach((p) => {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="ico">${svgWrap(SVG.file, 'currentColor', 16)}</span><span class="label">${escapeHtml(baseOf(p))}</span>`;
-    li.title = p;
-    li.onclick = () => openWith(p, 'default');
+  if (!list.length) { ul.innerHTML = '<div class="nav-empty">用 Claude Code / Codex 跑过的项目会出现在这里</div>'; return; }
+  list.forEach((pj) => {
+    const li = navDirLi(pj.name, pj.path);
+    li.querySelector('.label').title = `${pj.path}\n${pj.agents.join(' + ')} · ${agoShort(pj.lastActive)}前活跃`;
+    const when = document.createElement('span');
+    when.className = 'when';
+    pj.agents.forEach((a) => {
+      const dot = document.createElement('i');
+      dot.className = 'agent-dot ' + a;
+      dot.title = a;
+      when.appendChild(dot);
+    });
+    when.append(agoShort(pj.lastActive));
+    li.appendChild(when);
     ul.appendChild(li);
   });
 }
@@ -1357,9 +1430,7 @@ function renderRecentOpened() {
 // 都能直接作用在最近列表上，不会把视图无声切回上一个目录
 async function showRecent() {
   state.recentMode = true;
-  state.filter = '';
   state.cursor = -1;
-  $('#quick-filter').value = '';
   $('#file-area').innerHTML = '<div class="cmdk-loading">扫描最近修改的文件…</div>';
   renderBreadcrumb();
   const data = await api('/api/recent?root=' + encodeURIComponent(state.cwd || state.home));
@@ -1574,6 +1645,15 @@ function bindTerminalResizer() {
 
 // ---------- 事件绑定 ----------
 function bindEvents() {
+  // 顶栏窄时分级藏低频控件（观测自身宽度而非视口——侧栏会吃掉一截且可折叠）
+  const tb = $('#topbar');
+  new ResizeObserver((es) => {
+    const w = es[0].contentRect.width;
+    tb.classList.toggle('tb-sm', w < 980);
+    tb.classList.toggle('tb-xs', w < 880);
+    tb.classList.toggle('tb-xxs', w < 790);
+    tb.classList.toggle('tb-min', w < 660);
+  }).observe(tb);
   $('#btn-back').onclick = goBack;
   $('#btn-up').onclick = goUp;
   $('#preview-close').onclick = closePreview;
@@ -1581,8 +1661,10 @@ function bindEvents() {
   $('#btn-recent').onclick = showRecent;
   $('#btn-changes').onclick = () => toggleChangesPanel();
   $('#btn-terminal').onclick = () => term.toggle();
-  $('#term-claude').onclick = () => term.launchAgent('claude');
+  $('#term-claude').onclick = () => term.launchAgent('claude --dangerously-skip-permissions');
   $('#term-codex').onclick = () => term.launchAgent('codex');
+  usagePanel.bind();
+  $('#skills-entry').onclick = () => skillsView.show();
   $('#term-newtab').onclick = () => term.newTab();
   $('#term-max').onclick = () => term.toggleMax();
   $('#term-dock').onclick = () => term.setDock(term.dock === 'bottom' ? 'right' : 'bottom');
@@ -1624,21 +1706,29 @@ function bindEvents() {
       }
       return;
     }
+    // skill 行拖进终端：注入 /name 或 $name（按会话里跑的 agent），不是当路径插
+    const sk = ev.dataTransfer.getData('application/x-fanbox-skill');
+    if (sk) { invokeSkillInTerm(sk); return; }
     const p = ev.dataTransfer.getData('application/x-fanbox-path') || ev.dataTransfer.getData('text/plain');
     if (p) term.insertPath(p);
   });
   // 全局兜底：文件拖到窗口其它区域松手时，阻止 Electron 导航到 file:// 顶掉整个界面
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', (e) => e.preventDefault());
-  $('#btn-new-dir').onclick = () => doCreate('dir');
-  $('#btn-new-file').onclick = () => doCreate('file');
+  // 文件区空白处双击 → 新建菜单（原顶部筛选行已移除，新建入口收进这里）
+  $('#file-area').addEventListener('dblclick', (e) => {
+    if (e.target.closest('.item')) return; // 条目自身的双击是「打开」，不抢
+    popupMenu(e, [
+      { label: '新建文件夹…', fn: () => doCreate('dir') },
+      { label: '新建文件…', fn: () => doCreate('file') },
+    ]);
+  });
   document.addEventListener('click', (e) => { if (!e.target.closest('#context-menu')) closeContextMenu(); });
   window.addEventListener('blur', closeContextMenu);
   $('#scope-toggle').onclick = () => cmdk.toggleScope();
 
   $('#toggle-hidden').checked = state.showHidden;
   $('#toggle-hidden').onchange = (e) => { state.showHidden = e.target.checked; localStorage.setItem('fb_hidden', state.showHidden ? '1' : '0'); renderFiles(); };
-  $('#quick-filter').oninput = (e) => { state.filter = e.target.value; state.cursor = -1; renderFiles(); };
 
   $('#sort-seg').querySelectorAll('button').forEach((b) => {
     b.classList.toggle('active', b.dataset.sort === state.sort);
@@ -1673,15 +1763,9 @@ function bindEvents() {
     if (lbOpen) { if (e.key === 'Escape') document.querySelector('.lightbox').remove(); return; }
     if (imgEditState && (e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); ieUndo(imgEditState); return; }
     const inInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
-    // 输入框里按 Esc 先退出输入（筛选框还会清空内容），别越级把预览关掉
-    if (e.key === 'Escape' && inInput) {
-      const el = document.activeElement;
-      if (el.id === 'quick-filter' && el.value) { el.value = ''; state.filter = ''; state.cursor = -1; renderFiles(); }
-      el.blur();
-      return;
-    }
+    // 输入框里按 Esc 先退出输入，别越级把预览关掉
+    if (e.key === 'Escape' && inInput) { document.activeElement.blur(); return; }
     if (e.key === 'Escape' && !$('#preview').classList.contains('hidden')) { closePreview(); return; }
-    if (e.key === '/' && !inInput) { e.preventDefault(); $('#quick-filter').focus(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key === '[') { e.preventDefault(); goBack(); return; }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B') && !inInput) { e.preventDefault(); toggleSidebar(); return; }
     if (inInput) return;
@@ -1723,6 +1807,9 @@ function applyTheme(skin, rerender = true) {
 }
 
 // ---------- 内嵌终端（仅桌面 app；浏览器版优雅降级）----------
+// agent「等你拍板」界面特征（claude code 2.1.x / codex 0.13x 实测文案，宁缺勿滥：
+// 不命中只是退化成「任务完成」标题，不会漏响）
+const TERM_ASK_RE = /(Do you want to (proceed|continue|make this edit|allow|use this)|Would you like to proceed|Ready to code\?|created or one you trust\?|tell (Claude|Codex) what to do differently|Yes, and don't ask again|Allow Codex to (run|apply|create)|Codex wants to|[❯›][ \t]*1\.[ \t]*Yes)/;
 const term = {
   sessions: [], seq: 0, active: null, maximized: false,
   dock: localStorage.getItem('fb_term_dock') || 'bottom',
@@ -1797,32 +1884,46 @@ const term = {
     if (b) { b.classList.toggle('on', this.maximized); b.title = this.maximized ? '还原终端' : '终端铺满'; }
     this.fitActive();
   },
-  // 在指定目录开终端（新标签）；浏览器版降级到系统终端
+  // 在指定目录开终端（新标签）；浏览器版降级到系统终端。返回新 session（spawn 完成后）
   openInDir(dir) {
-    if (!this.available()) { openWith(dir, 'terminal'); return; }
+    if (!this.available()) { openWith(dir, 'terminal'); return null; }
     $('#terminal-panel').classList.remove('hidden');
     $('#terminal-resizer').classList.remove('hidden');
     this.applyDock();
     $('#btn-terminal').classList.add('active');
-    this.newTab(dir);
+    localStorage.setItem('fb_term_open', '1'); // 右键/一键开终端也记住开合，和 open/close 对称
+    return this.newTab(dir);
   },
   // 拖拽文件/文件夹进来：把 shell 转义后的路径插入活动终端（作为 agent 上下文）
   insertPath(p) {
     if (!this.available()) { openWith(dirOf(p), 'terminal'); return; }
     const wasHidden = $('#terminal-panel').classList.contains('hidden');
     if (wasHidden) this.open();
-    const write = () => { if (this.active) window.fanboxPty.input(this.active, shQuote(p) + ' '); const s = this.sessions.find((x) => x.id === this.active); if (s) s.xterm.focus(); };
+    const write = () => { if (this.active) this.input(this.active, shQuote(p) + ' '); const s = this.sessions.find((x) => x.id === this.active); if (s) s.xterm.focus(); };
     if (wasHidden) setTimeout(write, 280); else write();
   },
-  // 一键在活动终端启动 coding agent（终端没开就先开、没标签就建一个）
-  launchAgent(cmd) {
+  // 一键在终端启动 coding agent：当前标签是空闲 shell 就地启动；正跑着东西（claude/codex/任何前台程序）
+  // 则新开标签，不打断也不把命令打进别的程序里
+  async launchAgent(cmd) {
     if (!this.available()) { openWith(state.cwd, 'terminal'); return; } // 网页版降级到系统终端
-    const wasHidden = $('#terminal-panel').classList.contains('hidden');
-    if (wasHidden) this.open();
-    if (!this.sessions.length) this.newTab();
-    const run = () => { if (this.active) { window.fanboxPty.input(this.active, cmd + '\r'); const s = this.sessions.find((x) => x.id === this.active); if (s) s.xterm.focus(); } };
-    setTimeout(run, wasHidden || !this.sessions.length ? 340 : 0);
-    toast('已在终端启动 ' + cmd);
+    let sess = null;
+    if (this.sessions.length) {
+      if ($('#terminal-panel').classList.contains('hidden')) this.open();
+      const cur = this.sessions.find((x) => x.id === this.active);
+      if (cur && !cur.dead && await this.isPlainShell(cur)) sess = cur;
+    }
+    if (!sess) sess = await this.openInDir(state.cwd); // 等 spawn 完，拿确切 session 写入
+    if (sess && !sess.dead) { this.input(sess.id, cmd + '\r'); sess.xterm.focus(); toast('已在终端启动 ' + cmd); }
+    else toast('终端启动失败', true);
+  },
+  // 该会话前台是不是裸 shell？判断不了一律按「不是」处理——宁可新开标签，也不往运行中的程序里打字
+  async isPlainShell(s) {
+    try {
+      const r = await window.fanboxPty.proc(s.id);
+      if (!r || !r.ok || !r.proc) return false;
+      const name = String(r.proc).split('/').pop().replace(/^-/, '').toLowerCase();
+      return ['zsh', 'bash', 'fish', 'sh', 'dash', 'tcsh', 'nu', 'pwsh', 'powershell.exe', 'cmd.exe'].includes(name);
+    } catch { return false; }
   },
   // 把预览里选中的文字作为「上下文」喂给终端 agent：带文件出处 + 围栏，bracketed paste 防逐行误提交
   sendContext(text, srcPath) {
@@ -1835,37 +1936,87 @@ const term = {
     const write = () => {
       if (!this.active) return;
       // \x1b[200~ … \x1b[201~ 是 bracketed paste：多行内容当作一次粘贴，不会被 shell/TUI agent 逐行执行
-      window.fanboxPty.input(this.active, '\x1b[200~' + block + '\x1b[201~');
+      this.input(this.active, '\x1b[200~' + block + '\x1b[201~');
       const s = this.sessions.find((x) => x.id === this.active); if (s) s.xterm.focus();
     };
     if (wasHidden) setTimeout(write, 300); else write();
   },
-  // 点终端里的文件名/路径 → 结合 cwd + 搜索定位真实文件，在翻箱里打开
+  // 用户输入统一入口：记 lastInput 供回显过滤（击键/粘贴/拖路径/跟随 cd 引发的重绘不算 agent 干活）
+  input(id, d) {
+    const s = this.sessions.find((x) => x.id === id);
+    if (s) {
+      s.lastInput = Date.now();
+      // 回车多半提交了条命令（cd 这类被回显过滤、不走 busy 周期），稍后把标题对齐真实目录
+      if (d.indexOf('\r') !== -1) { clearTimeout(s._cwdT); s._cwdT = setTimeout(() => this.refreshCwd(s, true), 800); }
+    }
+    window.fanboxPty.input(id, d);
+  },
+  // 点终端里的文件名/路径 → 结合 cwd + 回扫 scrollback + 搜索定位真实文件，在翻箱里打开
   // tail：路径在该逻辑行里的后续文本，服务端用它做「空格扩展」stat 验证（带空格的文件名靠它补全）
-  async openTermPath(id, raw, tail) {
+  // rowHint：点击处逻辑行的末物理行号（buffer 绝对行），回扫 scrollback 的起点
+  async openTermPath(id, raw, tail, rowHint) {
     let p = String(raw).replace(/^['"]+/, '').replace(/[)\]'"`,:;]+$/, '');
     let cwd = state.cwd;
     let candidate = p;
-    // 绝对路径：/、~、以及 Windows 盘符 C:\ 或 C:/
-    const isAbs = p.startsWith('/') || p.startsWith('~') || /^[A-Za-z]:[\\/]/.test(p);
-    if (!isAbs) {
+    // 相对路径判断兼容 Windows 盘符：C:\ 或 C:/ 开头也是绝对路径
+    const isRel = !p.startsWith('/') && !p.startsWith('~') && !/^[A-Za-z]:[\\/]/.test(p);
+    if (isRel) {
       try { const r = await window.fanboxPty.cwd(id); if (r && r.ok && r.cwd) cwd = r.cwd; } catch { /* */ }
       candidate = (cwd || '').replace(/[\\/]+$/, '') + state.sep + p.replace(/^\.[\\/]/, '');
     }
     const name = p.split(/[\\/]/).pop();
+    // 回扫 scrollback：agent 生成文件时几乎总打印过全路径（裸文件名常常不在 cwd 下），比模糊搜索可信
+    const alt = isRel ? this.scanScrollbackFor(id, name, rowHint) : '';
+    // 活跃项目根（浏览目录 + 各终端项目目录）作 basename 搜索的额外根
+    const roots = [];
+    if (state.cwd) roots.push(state.cwd);
+    this.sessions.forEach((x) => { const d = x.cwd || x.startDir; if (d && !roots.includes(d)) roots.push(d); });
     const q = encodeURIComponent;
-    const r = await api(`/api/locate?path=${q(candidate)}&name=${q(name)}&root=${q(cwd || state.home)}&tail=${q(tail || '')}`);
+    const r = await api(`/api/locate?path=${q(candidate)}&name=${q(name)}&root=${q(cwd || state.home)}&tail=${q(tail || '')}&alt=${q(alt)}&roots=${q(roots.join('\n'))}`);
     if (!r.found) { toast('没找到「' + name + '」', true); return; }
     if (r.isDir) { navigate(r.path); toast('已跳到该目录'); return; }
     await navigate(dirOf(r.path));
     const e = state.entries.find((x) => x.path === r.path) || { path: r.path, name: baseOf(r.path), kind: 'text', isDir: false };
     applySelection(r.path); openPreview(e); recordRecent(r.path);
-    toast(r.viaSearch ? '未精确命中，已打开最接近的「' + baseOf(r.path) + '」' : '已打开');
+    toast(r.viaSearch ? '未精确命中，已打开最接近的「' + baseOf(r.path) + '」' : (r.viaScrollback ? '已按会话里出现过的路径打开' : '已打开'));
+  },
+  // 从 fromRow 往上回扫 scrollback（最多 2000 物理行），收集含该 basename 的绝对路径（/ 或 ~ 开头，
+  // 最近出现在前，≤3 个），交给 /api/locate 逐个 stat 验证。折行沿 isWrapped 拼回逻辑行；
+  // 含 … 的截断路径、URL（// 开头或紧跟冒号）跳过，继续往上找干净的
+  scanScrollbackFor(id, name, fromRow) {
+    const s = this.sessions.find((x) => x.id === id);
+    if (!s || !name) return '';
+    const buf = s.xterm.buffer.active;
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(?:~|/)(?:[^\\s\'"`()]*/)?' + esc + '(?=$|[\\s\'"`)\\],:;。，）】])', 'gu');
+    const hits = [];
+    let row = Math.min(fromRow == null ? buf.length - 1 : fromRow, buf.length - 1);
+    let budget = 2000;
+    while (row >= 0 && budget > 0 && hits.length < 3) {
+      let start = row;
+      while (start > 0 && buf.getLine(start) && buf.getLine(start).isWrapped) start--;
+      budget -= row - start + 1;
+      let text = '';
+      for (let i = start; i <= row; i++) {
+        const ln = buf.getLine(i);
+        if (ln) text += ln.translateToString(i === row); // 折行中段保持整行宽（不 trim），仅末行 trim
+      }
+      if (text.includes(name)) {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(text)) !== null) { // 行内多候选：跳过被护栏否决的，继续找同行更干净的
+          const cand = m[0];
+          if (cand && !cand.includes('…') && !cand.startsWith('//') && text[m.index - 1] !== ':' && !hits.includes(cand)) { hits.push(cand); break; }
+        }
+      }
+      row = start - 1;
+    }
+    return hits.join('\n');
   },
   // 终端跟随浏览：把活动终端 cd 到指定目录
   syncCd(dir) {
     if (!this.active || !dir) return;
-    window.fanboxPty.input(this.active, 'cd ' + shQuote(dir) + '\r');
+    this.input(this.active, 'cd ' + shQuote(dir) + '\r');
   },
   setFollow(on) {
     this.followBrowse = on;
@@ -1880,12 +2031,32 @@ const term = {
     if (r && r.ok && r.cwd) navigate(r.cwd);
     else toast('取终端目录失败', true);
   },
+  // 项目身份色：路径稳定哈希到色相——同一项目的标签色点永远一个色，扫一眼即配对
+  hueOf(p) { let h = 0; for (let i = 0; i < (p || '').length; i++) h = (h * 31 + p.charCodeAt(i)) >>> 0; return h % 360; },
+  // 标签标题跟着终端「现在」的目录走（lsof 查真实 cwd），不再停留在创建时的快照；
+  // 多标签跑不同项目的 agent 时，标题才认得出谁是谁
+  async refreshCwd(s, force) {
+    if (!s || s.dead) return;
+    const now = Date.now();
+    // 轻节流：避免每 3-5 秒打一条日志的后台会话（dev server）在 busy→idle 间无限循环里反复 spawn lsof。
+    // cd / 用户主动场景传 force 跳过节流，标题立刻对齐
+    if (!force && now - (s._cwdAt || 0) < 4000) return;
+    s._cwdAt = now;
+    try {
+      const r = await window.fanboxPty.cwd(s.id);
+      if (r && r.ok && r.cwd && r.cwd !== s.cwd) {
+        s.cwd = r.cwd; s.title = baseOf(r.cwd) || s.title;
+        this.renderTabs(); renderBreadcrumb(); // 面包屑的项目配对色点也跟着换
+      }
+    } catch { /* 取不到就保持原标题 */ }
+  },
   async newTab(cwdOverride) {
     const startDir = cwdOverride || state.cwd;
     const id = 't' + (++this.seq);
     const host = document.createElement('div');
     host.className = 'xterm-instance';
     $('#xterm-host').appendChild(host);
+    host.classList.add('show'); // 先可见再 open/fit：display:none 下 fit 量不出尺寸，PTY 会以 80 列出生
     const FitCtor = window.FitAddon ? (window.FitAddon.FitAddon || window.FitAddon) : null;
     const xterm = new window.Terminal({
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',
@@ -1902,6 +2073,21 @@ const term = {
       try { const U = window.Unicode11Addon.Unicode11Addon || window.Unicode11Addon; xterm.loadAddon(new U()); xterm.unicode.activeVersion = '11'; } catch { /* */ }
     }
     xterm.open(host);
+    // 滚动失同步自愈：DOM 滚动条已到底但 buffer 没到底，是 5.5.0 旧 Viewport 的 bug 签名
+    //（正常跟随输出时两者同步在底、用户上翻时 DOM 不在底，都不会触发），重算滚动区并到底
+    const vpEl = host.querySelector('.xterm-viewport');
+    if (vpEl) host.addEventListener('wheel', (ev) => {
+      if (ev.deltaY <= 0) return; // 只管「向下滚卡住」
+      requestAnimationFrame(() => { try {
+        const b = xterm.buffer.active;
+        if (b.type !== 'normal') return; // vim/htop 的 alt-screen 没有滚动条语义
+        const atDomBottom = vpEl.scrollTop + vpEl.clientHeight >= vpEl.scrollHeight - 2;
+        if (atDomBottom && b.viewportY < b.baseY) {
+          xterm._core.viewport?.syncScrollArea?.(true);
+          xterm.scrollToBottom();
+        }
+      } catch { /* 滚动中关标签：xterm 已 dispose，忽略 */ } });
+    }, { passive: true });
     // WebGL 渲染加速（大输出/TUI 不掉帧），失败或上下文丢失回退 DOM
     if (!window.__noWebgl && window.WebglAddon) {
       try {
@@ -1917,12 +2103,14 @@ const term = {
     this.activate(id);
     updateWatches(); // 新终端的项目目录也纳入监听
     const r = await window.fanboxPty.spawn({ id, cwd: startDir, cols: xterm.cols, rows: xterm.rows });
-    if (!r.ok) { xterm.write('\r\n  \x1b[31m终端启动失败：' + (r.error || '') + '\x1b[0m\r\n'); }
+    if (!r.ok) { sess.dead = true; xterm.write('\r\n  \x1b[31m终端启动失败：' + (r.error || '') + '\x1b[0m\r\n'); }
+    else sess.cwd = r.cwd || startDir; // 末尾 renderTabs 统一带上 cwd 重画
     xterm.onData((d) => {
       if (sess.dead) { if (d === '\r' || d === '\n') this.respawn(sess); return; } // 进程退出后回车真重开
-      window.fanboxPty.input(id, d);
+      this.input(id, d);
     });
-    xterm.onResize(({ cols, rows }) => window.fanboxPty.resize(id, cols, rows));
+    xterm.onResize(({ cols, rows }) => { sess.lastInput = Date.now(); window.fanboxPty.resize(id, cols, rows); }); // resize 引发的 TUI 重绘不算 agent 干活
+    window.fanboxPty.resize(id, xterm.cols, xterm.rows); // spawn 等待期间 fit 过的 resize 事件无人监听会丢：补发一次对齐 PTY
     // 识别终端输出里的文件路径 → hover 高亮 + 点击在翻箱打开
     // 三层匹配：引号串（边界最可靠，文件名可含空格）> 斜杠路径 > 带已知扩展名的裸文件名；
     // 长路径折行用逐 cell 拼回逻辑行（CJK 宽字符占两列，下标→坐标必须按 cell 算才不偏移）
@@ -1959,7 +2147,7 @@ const term = {
               range: { start: { x: a.x, y: a.y }, end: { x: b.x + b.w - 1, y: b.y } },
               text: cand,
               decorations: { pointerCursor: true, underline: true },
-              activate: () => this.openTermPath(id, cand, tail),
+              activate: () => this.openTermPath(id, cand, tail, endRow),
             });
           };
           let m;
@@ -2003,12 +2191,14 @@ const term = {
       });
     }
     this.renderTabs();
+    return sess;
   },
   async respawn(sess) {
     sess.dead = false;
     sess.xterm.reset(); // 清掉死亡残留，新 shell 提示符不和旧画面叠在一起
     const r = await window.fanboxPty.spawn({ id: sess.id, cwd: sess.startDir || state.cwd, cols: sess.xterm.cols, rows: sess.xterm.rows });
     if (!r.ok) { sess.dead = true; sess.xterm.write('\x1b[31m重开失败：' + (r.error || '') + '\x1b[0m\r\n'); }
+    else sess.cwd = r.cwd || sess.startDir;
   },
   activate(id) {
     this.active = id;
@@ -2017,7 +2207,15 @@ const term = {
     if (cur) cur.unread = false; // 切到该标签即清未读
     this.renderTabs();
     const s = this.sessions.find((x) => x.id === id);
-    if (s) { this.fitActive(); setTimeout(() => s.xterm.focus(), 0); }
+    if (s) {
+      this.fitActive();
+      // xterm 5.5.0 旧 Viewport 在 display:none 期间会把滚动区高度算矮一屏（上游 #5339，6.0 重写才修）；
+      // 重新可见后强制同步一次，否则滚轮到不了底部。升级 xterm 6.0 后删掉这行
+      requestAnimationFrame(() => { try { s.xterm._core.viewport?.syncScrollArea?.(true); } catch { /* */ } });
+      setTimeout(() => s.xterm.focus(), 0);
+      // 延迟刷新标题（避开双击窗口：双击的第二下若撞上 renderTabs 重建会丢 dblclick 事件）
+      setTimeout(() => this.refreshCwd(s), 600);
+    }
   },
   closeTab(id) {
     const i = this.sessions.findIndex((x) => x.id === id);
@@ -2037,14 +2235,28 @@ const term = {
     if (!s || !s.fit) return;
     requestAnimationFrame(() => { try { s.fit.fit(); } catch { /* */ } });
   },
-  // agent 态势感知：终端有输出→busy；静默 >1.2s→idle；进程退出→dead。
+  // agent 态势感知：终端有输出→busy；静默 >2.5s→idle；进程退出→dead。
   // 非活动标签产生输出标记未读小点；长任务（busy>4s）完成且窗口失焦/非当前标签时发系统通知。
   markBusy(s) {
-    s.lastData = Date.now();
-    if (s.status !== 'busy') { s.status = 'busy'; s.busyStart = s.lastData; this.renderTabs(); }
+    const now = Date.now();
+    $('#terminal-panel').classList.remove('term-awaiting'); // 又有动静了，撤掉「轮到你」呼吸
+    // 回显过滤：距上次用户输入 <400ms 的输出多半是回显/TUI 重绘，不算 agent 自主干活：
+    // 不进入 busy、不推 busyStart；已在 busy 则只续命（agent 干活时排队打字不打断）。
+    // 续命只刷新 lastData（推迟评估时机），不刷新 lastReal（任务时长只数自发输出，打字不算工时）
+    if (now - (s.lastInput || 0) < 400) { if (s.status === 'busy') s.lastData = now; return; }
+    s.lastData = now; s.lastReal = now;
+    if (s.status !== 'busy') { s.status = 'busy'; s.busyStart = now; this.renderTabs(); }
     if (s.id !== this.active) { if (!s.unread) { s.unread = true; this.renderTabs(); } }
-    $('#terminal-panel').classList.remove('term-awaiting'); // 又有输出了，撤掉「轮到你」呼吸
     this.ensureStatusTick();
+  },
+  // 取缓冲区末尾 n 行纯文本：确认对话框和忙碌页脚都画在底部
+  tailText(s, n = 25) {
+    try {
+      const buf = s.xterm.buffer.active;
+      let t = '';
+      for (let i = Math.max(0, buf.length - n); i < buf.length; i++) { const ln = buf.getLine(i); if (ln) t += ln.translateToString(true) + '\n'; }
+      return t;
+    } catch { return ''; }
   },
   // 轮到你了：终端边缘呼吸几秒，余光可感（agent 干完一段、把球踢回给你）
   awaitGlow() {
@@ -2059,18 +2271,25 @@ const term = {
     this._statusTimer = setInterval(() => {
       const now = Date.now(); let anyBusy = false;
       this.sessions.forEach((s) => {
-        if (s.status === 'busy') {
-          if (now - (s.lastData || 0) > 1200) {
-            const dur = (s.lastData || 0) - (s.busyStart || 0);
-            s.status = 'idle';
-            this.renderTabs();
-            if (dur > 1500) this.awaitGlow(); // 非琐碎回显才提示「轮到你」
-            if (dur > 4000) { // 跑了一会儿的真任务完成：文件区涟漪 + 极轻提示音 + 必要时系统通知
-              rippleFileArea();
-              playChime('done');
-              if (!document.hasFocus() || s.id !== this.active) this.notify(s, 'agent 任务完成', (s.title || 'shell') + ' 已空闲');
-            }
-          } else anyBusy = true;
+        if (s.status !== 'busy') return;
+        const quiet = now - (s.lastData || 0);
+        if (quiet <= 2500) { anyBusy = true; return; } // claude/codex 忙碌心跳约 1s 一帧，容差太紧会闪断误报
+        const tail = this.tailText(s);
+        // 假静默护栏：页脚仍挂着「esc to interrupt」说明 agent 还在跑（失焦降频/网络卡顿），30s 内不判收工
+        if (quiet < 30000 && /esc to interrupt/i.test(tail)) { anyBusy = true; return; }
+        const dur = (s.lastReal || 0) - (s.busyStart || 0); // 工时只数自发输出：回显续命不算，免得打字把琐碎回显养肥成「真任务」
+        s.status = 'idle';
+        this.renderTabs();
+        this.refreshCwd(s); // 干完一段活，标题对齐终端真实目录
+        const ask = dur > 600 && TERM_ASK_RE.test(tail); // 停在审批/确认界面：等你拍板（不设 4s 门槛，审批常来得很快）
+        if (ask || dur > 1500) this.awaitGlow();
+        if (ask) {
+          playChime('ask'); // 非 done → 单音，和「完成」的双音区分开
+          if (!document.hasFocus() || s.id !== this.active) this.notify(s, '等待你确认', (s.title || 'shell') + ' 在等你拍板');
+        } else if (dur > 4000) { // 跑了一会儿的真任务完成：文件区涟漪 + 极轻提示音 + 必要时系统通知
+          rippleFileArea();
+          playChime('done');
+          if (!document.hasFocus() || s.id !== this.active) this.notify(s, 'agent 任务完成', (s.title || 'shell') + ' 已空闲');
         }
       });
       if (!anyBusy) { clearInterval(this._statusTimer); this._statusTimer = null; }
@@ -2091,13 +2310,300 @@ const term = {
       const dotState = s.dead ? 'dead' : (s.status === 'busy' ? 'busy' : 'idle');
       t.className = 'term-tab' + (s.id === this.active ? ' active' : '') + (s.unread ? ' unread' : '');
       const dotTitle = s.dead ? '进程已退出' : (s.status === 'busy' ? 'agent 运行中' : '空闲');
-      t.innerHTML = `<span class="tab-dot ${dotState}" title="${dotTitle}"></span>${ic('term', 'currentColor', 12)}<span>${escapeHtml(s.title)}</span><span class="tab-x" title="关闭">✕</span>`;
+      // 终端图标按项目路径染色：同项目同色，和面包屑的配对色点呼应
+      const hue = this.hueOf(s.cwd || s.startDir);
+      t.title = '双击：文件区跳到该终端所在目录';
+      t.innerHTML = `<span class="tab-dot ${dotState}" title="${dotTitle}"></span>${ic('term', `hsl(${hue} 62% 48%)`, 12)}<span>${escapeHtml(s.title)}</span><span class="tab-x" title="关闭">✕</span>`;
       t.onclick = (e) => { if (e.target.classList.contains('tab-x')) { this.closeTab(s.id); return; } this.activate(s.id); };
+      t.ondblclick = (e) => { if (e.target.classList.contains('tab-x')) return; this.locateCwd(); };
       bar.appendChild(t);
     });
   },
   retheme() { const th = this.theme(); this.sessions.forEach((s) => { s.xterm.options.theme = th; }); },
 };
+
+// ---------- Agent 用量面板（侧栏常驻，可开合）----------
+// Claude Code 是官方限额窗口（5h/周，OAuth 接口）+ 本地 token 统计兜底，Codex 是官方配额快照（来自其会话日志）
+const usagePanel = {
+  timer: null,
+  fmtTok(n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(n < 1e10 ? 1 : 0) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(0) + 'k';
+    return String(n);
+  },
+  fmtReset(sec) {
+    if (!sec) return '';
+    const d = new Date(sec * 1000);
+    const sameDay = d.toDateString() === new Date().toDateString();
+    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return (sameDay ? '' : '周' + '日一二三四五六'[d.getDay()] + ' ') + hm + ' 重置';
+  },
+  ago(ms) {
+    const m = Math.round((Date.now() - ms) / 60000);
+    if (m < 2) return '刚刚';
+    if (m < 60) return m + ' 分钟前';
+    if (m < 1440) return Math.round(m / 60) + ' 小时前';
+    return Math.round(m / 1440) + ' 天前';
+  },
+  bar(label, pct, extra) {
+    const v = Math.max(0, Math.min(100, Math.round(pct)));
+    const danger = v >= 85 ? ' danger' : '';
+    return `<div class="usage-row"><span class="usage-label">${label}</span>
+      <span class="usage-bar"><i class="${danger.trim()}" style="width:${v}%"></i></span>
+      <span class="usage-num${danger}">${v}%</span></div>
+      ${extra ? `<div class="usage-sub">${extra}</div>` : ''}`;
+  },
+  render(d) {
+    const box = $('#usage-body');
+    if (!d || !d.ok) { box.innerHTML = '<div class="usage-sub">读取失败</div>'; return; }
+    let h = '';
+    if (d.codex) {
+      const c = d.codex;
+      h += `<div class="usage-agent">Codex${c.planType ? ` <i class="usage-plan">${escapeHtml(c.planType)}</i>` : ''}</div>`;
+      if (c.primary) h += this.bar('5h 窗口', c.primary.usedPercent, c.primary.stale ? '窗口已重置，跑一次 Codex 才有新数' : '');
+      if (c.secondary) h += this.bar('周配额', c.secondary.usedPercent, c.secondary.stale ? '窗口已重置，跑一次 Codex 才有新数' : this.fmtReset(c.secondary.resetsAt));
+      h += `<div class="usage-sub">快照：${this.ago(c.capturedAt)}的 Codex 会话</div>`;
+    }
+    if (d.claude) {
+      const c = d.claude;
+      h += `<div class="usage-agent">Claude Code</div>`;
+      if (c.official) {
+        // 官方限额窗口（和 Claude Code /usage 面板同源）：5h 滚动窗口 + 周配额，优先展示
+        if (c.official.fiveHour) h += this.bar('5h 窗口', c.official.fiveHour.usedPercent, this.fmtReset(c.official.fiveHour.resetsAt));
+        if (c.official.sevenDay) h += this.bar('周配额', c.official.sevenDay.usedPercent, this.fmtReset(c.official.sevenDay.resetsAt));
+      }
+      if (c.last5h) {
+        // 本地 token 统计照常保留（拿不到官方数据时就只剩这块）
+        h += `<div class="usage-trio">
+          <span><b>${this.fmtTok(c.last5h.total)}</b>近5h</span>
+          <span><b>${this.fmtTok(c.today.total)}</b>今日</span>
+          <span><b>${this.fmtTok(c.week.total)}</b>本周</span>
+        </div>
+        <div class="usage-sub">token 总量 · 本地会话日志统计</div>`;
+      }
+    }
+    if (!d.codex && !d.claude) h = '<div class="usage-sub">没找到 Claude Code / Codex 的本机会话记录</div>';
+    box.innerHTML = h;
+  },
+  async refresh() {
+    try { this.render(await api('/api/agent-usage')); }
+    catch { this.render(null); }
+  },
+  open() { return localStorage.getItem('fb_usage_open') === '1'; },
+  apply() {
+    const on = this.open();
+    $('#usage-body').classList.toggle('hidden', !on);
+    $('#usage-arrow').textContent = on ? '▾' : '▸';
+    clearInterval(this.timer); this.timer = null;
+    if (on) { this.refresh(); this.timer = setInterval(() => this.refresh(), 60000); }
+  },
+  bind() {
+    $('#usage-toggle').onclick = () => {
+      localStorage.setItem('fb_usage_open', this.open() ? '0' : '1');
+      this.apply();
+    };
+    this.apply();
+  },
+};
+
+// ---------- Skills 透视（主区全屏视图）----------
+const skillsView = {
+  data: null, filter: 'all', sort: 'hits', open: new Set(),
+  async show() {
+    state.skillsMode = true; state.recentMode = false; state.cursor = -1;
+    renderBreadcrumb();
+    $('#file-area').innerHTML = '<div class="cmdk-loading">扫描本机 skills…</div>';
+    try { this.data = await api('/api/skills'); } catch { $('#file-area').innerHTML = '<div class="nav-empty">扫描失败</div>'; return; }
+    this.render();
+  },
+  async reload() {
+    try { this.data = await api('/api/skills'); if (state.skillsMode) this.render(); } catch { /* */ }
+  },
+  srcTag(it) {
+    const cls = { claude: '', codex: ' codex', agents: ' codex', plugin: ' plugin', project: ' proj' }[it.source] || '';
+    return `<span class="sk-src${cls}">${escapeHtml(it.label)}</span>`;
+  },
+  ago(t) {
+    if (!t) return '—';
+    const m = Math.round((Date.now() - t) / 60000);
+    if (m < 60) return m < 2 ? '刚刚' : m + ' 分钟前';
+    if (m < 1440) return Math.round(m / 60) + ' 小时前';
+    return Math.round(m / 1440) + ' 天前';
+  },
+  rows() {
+    let arr = (this.data.items || []).slice();
+    const f = this.filter;
+    if (f === 'dup') arr = arr.filter((x) => x.copies);
+    else if (f === 'bad') arr = arr.filter((x) => x.issues.length);
+    else if (f === 'project') arr = arr.filter((x) => x.source === 'project');
+    else if (f === 'codex') arr = arr.filter((x) => x.source === 'codex' || x.source === 'agents');
+    else if (f !== 'all') arr = arr.filter((x) => x.source === f);
+    const ho = (x) => (x.residue || x.issues.length ? 0 : x.disabled ? 1 : 2);
+    if (this.sort === 'hits') arr.sort((a, b) => b.hits - a.hits || b.last - a.last || a.name.localeCompare(b.name));
+    if (this.sort === 'recent') arr.sort((a, b) => b.last - a.last || b.hits - a.hits);
+    if (this.sort === 'health') arr.sort((a, b) => ho(a) - ho(b) || b.hits - a.hits);
+    if (this.sort === 'name') arr.sort((a, b) => a.name.localeCompare(b.name));
+    return arr;
+  },
+  render() {
+    const o = this.data.overview;
+    const items = this.data.items || [];
+    const cnt = (fn) => items.filter(fn).length;
+    const over = o.budgetChars > o.budgetLimit;
+    const ratio = (o.budgetChars / o.budgetLimit).toFixed(1);
+    let h = `<div class="sk-wrap">
+      <div class="sk-stats">
+        <div class="sk-stat"><div class="sk-num">${o.unique}<small>/${o.total}</small></div><div class="sk-lbl">全部 skills</div><div class="sk-note">唯一 / 含跨端副本</div></div>
+        <div class="sk-stat"><div class="sk-num good">${o.active}</div><div class="sk-lbl">45 天内活跃</div><div class="sk-note">共 ${o.totalHits} 次触发</div></div>
+        <div class="sk-stat dust"><div class="sk-num">${o.dust}</div><div class="sk-lbl">在吃灰</div><div class="sk-note">45 天零触发</div></div>
+        <div class="sk-stat ${o.issues ? 'alert' : ''}"><div class="sk-num">${o.issues}</div><div class="sk-lbl">有问题</div><div class="sk-note">截断 / 缺 frontmatter / 残留</div></div>
+        <div class="sk-budget">
+          <div class="sk-lbl" style="display:flex;justify-content:space-between"><span>Claude 常驻预算（描述总量）</span>${over ? `<b class="bad-t">≈超限 ${ratio}×</b>` : ''}</div>
+          <div class="sk-bar"><i style="width:${Math.min(100, o.budgetChars / o.budgetLimit * 41)}%"></i><em></em></div>
+          <div class="sk-cap"><span>${o.budgetChars.toLocaleString()} 字符 / 预算约 ${o.budgetLimit.toLocaleString()}（估算）</span><span>${over ? '超出部分被静默丢弃，对应 skill 不会触发' : ''}</span></div>
+        </div>
+      </div>
+      <div class="sk-tools">
+        <div class="sk-chips">
+          ${[['all', '全部', items.length],
+             ['claude', 'Claude 全局', cnt((x) => x.source === 'claude')],
+             ['project', '项目', cnt((x) => x.source === 'project')],
+             ['plugin', '插件', cnt((x) => x.source === 'plugin')],
+             ['codex', 'Codex', cnt((x) => x.source === 'codex' || x.source === 'agents')],
+             ['dup', '跨端重复', cnt((x) => x.copies)],
+             ['bad', '仅看问题', o.issues]]
+            .map(([k, lbl, n]) => `<button class="sk-chip ${this.filter === k ? 'on' : ''}" data-f="${k}">${lbl} <i>${n}</i></button>`).join('')}
+        </div>
+        <select class="sk-sort" id="sk-sort">
+          <option value="hits" ${this.sort === 'hits' ? 'selected' : ''}>按触发次数</option>
+          <option value="recent" ${this.sort === 'recent' ? 'selected' : ''}>按最后触发</option>
+          <option value="health" ${this.sort === 'health' ? 'selected' : ''}>按健康度</option>
+          <option value="name" ${this.sort === 'name' ? 'selected' : ''}>按名称</option>
+        </select>
+      </div>
+      <div class="sk-thead"><span></span><span>Skill</span><span>来源</span><span class="r">45 天触发</span><span class="r">最后触发</span><span class="r">启用</span><span></span></div>`;
+    let dustMarked = false;
+    this.rows().forEach((it) => {
+      if (this.sort === 'hits' && this.filter === 'all' && !dustMarked && it.hits === 0) {
+        h += `<div class="sk-mark">以下 ${o.dust} 个 45 天零触发——启用中的描述仍在每次会话占用预算</div>`;
+        dustMarked = true;
+      }
+      const key = it.dir;
+      const dot = it.issues.length ? (it.residue || it.issues.some((s) => s.includes('缺')) ? 'bad' : 'warn') : 'ok';
+      h += `<div class="sk-row ${this.open.has(key) ? 'expanded' : ''} ${it.disabled ? 'off' : ''}" data-dir="${escapeHtml(key)}" draggable="true">
+        <span class="sk-dot ${dot}"></span>
+        <div class="sk-name">
+          <div class="nm">${escapeHtml(it.name)}${it.copies ? ` <i class="sk-dup">${it.copies.length} 处副本</i>` : ''}${it.disabled ? ' <i class="sk-offtag">已停用</i>' : ''}</div>
+          <div class="ds">${escapeHtml(it.issues[0] || it.desc || '')}</div>
+        </div>
+        ${this.srcTag(it)}
+        <div class="sk-hits ${it.hits ? '' : 'zero'}">${it.hits || '· 0 ·'}</div>
+        <div class="sk-last">${this.ago(it.last)}</div>
+        ${it.residue
+          ? '<div class="sk-last r">残留</div>'
+          : `<label class="sk-switch ${it.disabled ? '' : 'on'}" data-act="toggle" title="${it.disabled ? '启用（移回 skills 目录）' : '停用（移入 _disabled/，不删文件，立即对模型不可见）'}"><i></i></label>`}
+        <span class="sk-chev">▸</span>
+      </div>`;
+      if (this.open.has(key)) {
+        const cut = this.data.overview.descCut;
+        h += `<div class="sk-detail">
+          <div>
+            <div class="fd">${escapeHtml(it.desc || '（无 description）')}${it.descLen > 240 ? '…' : ''}</div>
+            ${it.descLen > cut ? `<div class="fd-cut">⚠ description 共 ${it.descLen.toLocaleString()} 字符，第 ${cut.toLocaleString()} 字符之后模型看不见——靠后段触发词的场景不会触发</div>` : ''}
+            ${it.issues.map((s) => `<div class="fd-cut">⚠ ${escapeHtml(s)}</div>`).join('')}
+            <div class="fd-acts">
+              ${it.residue ? '' : '<button data-act="invoke" class="primary">▶ 终端调用</button>'}
+              <button data-act="reveal">在文件区显示</button>
+              ${it.residue ? '' : '<button data-act="edit">编辑 SKILL.md</button>'}
+              <button data-act="trash" class="danger">移到废纸篓</button>
+            </div>
+          </div>
+          <dl class="fd-meta">
+            <dt>描述体积</dt><dd>${it.descLen.toLocaleString()} 字符${it.descLen > cut ? ' · 超截断线' : ''}</dd>
+            <dt>路径</dt><dd class="mono">${escapeHtml(tilde(it.dir))}</dd>
+            ${it.copies ? `<dt>全部副本</dt><dd class="mono">${it.copies.map(escapeHtml).join('<br>')}</dd>` : ''}
+          </dl>
+        </div>`;
+      }
+    });
+    h += '</div>';
+    const area = $('#file-area');
+    area.innerHTML = h;
+    this.bind(area);
+  },
+  bind(area) {
+    area.querySelector('.sk-chips').onclick = (e) => {
+      const c = e.target.closest('.sk-chip'); if (!c) return;
+      this.filter = c.dataset.f; this.render();
+    };
+    area.querySelector('#sk-sort').onchange = (e) => { this.sort = e.target.value; this.render(); };
+    area.querySelector('.sk-wrap').addEventListener('click', async (e) => {
+      const row = e.target.closest('.sk-row');
+      const detail = e.target.closest('.sk-detail');
+      const act = e.target.closest('[data-act]');
+      const dir = row ? row.dataset.dir : detail ? detail.previousElementSibling.dataset.dir : null;
+      if (!dir) return;
+      const it = this.data.items.find((x) => x.dir === dir);
+      if (act && it) {
+        e.stopPropagation();
+        if (act.dataset.act === 'toggle') {
+          const r = await apiPost('/api/skills/toggle', { dir, enable: it.disabled });
+          if (r.ok) { toast(it.disabled ? '已启用 ' + it.name : '已停用 ' + it.name + '（文件还在，随时可启用）'); this.reload(); }
+          else toast('操作失败：' + (r.error || ''), true);
+        } else if (act.dataset.act === 'invoke') {
+          invokeSkillInTerm(it.name);
+        } else if (act.dataset.act === 'reveal') {
+          navigate(dirOf(it.dir));
+        } else if (act.dataset.act === 'edit') {
+          await navigate(it.dir);
+          const e2 = state.entries.find((x) => x.name === 'SKILL.md');
+          if (e2) { state.selected = e2.path; openPreview(e2); renderFiles(); }
+        } else if (act.dataset.act === 'trash') {
+          const ok = await confirmDialog(`把「${it.name}」移到废纸篓？（系统废纸篓里随时可恢复）`);
+          if (!ok) return;
+          const r = await apiPost('/api/skills/trash', { dir });
+          if (r.ok) { toast('已移到废纸篓'); this.open.delete(dir); this.reload(); }
+          else toast('删除失败：' + (r.error || ''), true);
+        }
+        return;
+      }
+      if (row) { this.open.has(dir) ? this.open.delete(dir) : this.open.add(dir); this.render(); }
+    });
+    // 拖 skill 行 → 终端：带 skill 名专用类型；text/plain 给外部目标
+    area.querySelectorAll('.sk-row').forEach((r) => {
+      r.addEventListener('dragstart', (ev) => {
+        const it = this.data.items.find((x) => x.dir === r.dataset.dir);
+        if (!it) return;
+        ev.dataTransfer.setData('application/x-fanbox-skill', it.name);
+        ev.dataTransfer.setData('text/plain', '/' + it.name);
+        ev.dataTransfer.effectAllowed = 'copy';
+      });
+    });
+  },
+};
+
+// 把 skill 注入当前终端：claude 会话用 /name，codex 会话用 $name；裸 shell 提示先启动 agent
+async function invokeSkillInTerm(name) {
+  if (typeof term === 'undefined' || !term.available()) { toast('需要桌面版的内嵌终端', true); return; }
+  if ($('#terminal-panel').classList.contains('hidden')) term.open();
+  const s = term.sessions.find((x) => x.id === term.active);
+  if (!s || s.dead) { toast('先开一个终端并启动 agent', true); return; }
+  let prefix = '/';
+  try {
+    const r = await window.fanboxPty.proc(s.id);
+    const pn = String((r && r.proc) || '').split('/').pop().replace(/^-/, '').toLowerCase();
+    if (pn.includes('codex')) prefix = '$';
+    else if (['zsh', 'bash', 'fish', 'sh', 'dash', 'tcsh', 'nu'].includes(pn)) {
+      toast('终端里还没启动 agent——先点 Claude / Codex 启动按钮', true);
+      s.xterm.focus();
+      return;
+    }
+  } catch { /* 判断不了就按 claude 的 / 语法 */ }
+  term.input(s.id, prefix + name + ' ');
+  s.xterm.focus();
+  toast(`已注入 ${prefix}${name}，接着补一句话回车`);
+}
 
 // ---------- Monaco 编辑器（本地 vendor，离线可用；加载失败回退 textarea）----------
 const mona = {
@@ -2220,9 +2726,7 @@ function recordChange(dir, filename) {
 }
 function renderChangesBadge() {
   const b = $('#changes-badge'); if (!b) return;
-  const n = state.changeLog.length;
-  b.textContent = String(n);
-  b.classList.toggle('hidden', n === 0);
+  b.classList.toggle('hidden', state.changeLog.length === 0);
 }
 function fmtClock(ms) { const d = new Date(ms); const p = (x) => String(x).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
 function toggleChangesPanel() {
@@ -2902,6 +3406,8 @@ async function init() {
   document.querySelectorAll('#theme-switch .theme-seg button').forEach((b) => { b.onclick = () => applyTheme(b.dataset.skin); });
   await loadRoots();
   await loadFavorites();
+  loadAgentProjects();
+  setInterval(loadAgentProjects, 120000); // agent 项目入口保持新鲜（服务端有 60s 缓存，开销很小）
   await navigate(state.home, false);
   chat.init();
   aiSettings.init();
@@ -2914,7 +3420,7 @@ async function init() {
 // 新版本提示：主进程查到 GitHub 有新 Release 时右下角弹胶囊，引导去下载页（不强更不打扰）
 function bindUpdateNotice() {
   if (!window.fanboxUpdate) return;
-  window.fanboxUpdate.onAvailable(({ version, url }) => {
+  const show = ({ version, url }) => {
     if (localStorage.getItem('fb_skip_ver') === version || document.querySelector('.update-pill')) return;
     const bar = document.createElement('div');
     bar.className = 'update-pill';
@@ -2922,6 +3428,9 @@ function bindUpdateNotice() {
     document.body.appendChild(bar);
     bar.querySelector('.up-go').onclick = () => { window.fanboxUpdate.open(url); bar.remove(); };
     bar.querySelector('.up-x').onclick = () => { localStorage.setItem('fb_skip_ver', version); bar.remove(); };
-  });
+  };
+  window.fanboxUpdate.onAvailable(show);
+  // 主进程启动 6 秒就推送，init 加载大目录时这里可能还没注册监听——补拉一次，错过的推送不丢
+  if (window.fanboxUpdate.get) window.fanboxUpdate.get().then((m) => { if (m) show(m); }).catch(() => {});
 }
 init();

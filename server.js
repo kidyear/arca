@@ -284,7 +284,7 @@ function fuzzyScore(query, target) {
   return score;
 }
 
-async function searchFiles(query, rootPath) {
+async function searchFiles(query, rootPath, deadlineTs) {
   const root = resolvePath(rootPath);
   const q = (query || '').trim();
   if (!q) return { results: [] };
@@ -299,7 +299,7 @@ async function searchFiles(query, rootPath) {
   };
   const { truncated } = await walk(root, {
     limit: 60000,
-    deadline: Date.now() + 4000,
+    deadline: deadlineTs || Date.now() + 4000, // 多根搜索时传共享截止点，封顶总耗时
     onFile: (f) => scoreInto(f, 0),
     // 文件夹小幅加权——vibe coding「一下午起十个项目」，最常找的就是项目目录本身
     onDir: (f) => scoreInto(f, 6),
@@ -445,7 +445,8 @@ function trashPath(p) {
     let cmd;
     if (PLATFORM === 'darwin') {
       // 路径走 argv，不拼进单引号 AppleScript 字面量——避免含 ' 的文件名删除失败/注入
-      cmd = `osascript -e 'on run argv' -e 'tell application "Finder" to delete (POSIX file (item 1 of argv))' -e 'end run' ${shellQuote(target)}`;
+      // POSIX file 必须 as alias 强转，否则 Finder 解析不了报 -1728
+      cmd = `osascript -e 'on run argv' -e 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)' -e 'end run' ${shellQuote(target)}`;
     } else if (PLATFORM === 'win32') {
       const method = isDir ? 'DeleteDirectory' : 'DeleteFile';
       const ps = target.replace(/'/g, "''");
@@ -492,10 +493,11 @@ async function createEntry(parentPath, name, type) {
   return { ok: true, path: target, isDir: type === 'dir' };
 }
 
-// 终端里点文件名 → 定位真实文件：直接 stat → 用 tail 做「空格扩展」逐候选 stat → basename 搜索。
+// 终端里点文件名 → 定位真实文件：直接 stat → 用 tail 做「空格扩展」逐候选 stat
+// → scrollback 回扫候选（alt）逐个 stat → 多根 basename 搜索。
 // 空格扩展：前端对带空格的文件名（macOS 截屏等）只能保守匹配到第一个空格，真实边界
 // 由文件系统验证——把行尾余文按空格边界逐段拼回路径，哪个候选 stat 命中就是哪个
-async function locatePath(p, name, root, tail) {
+async function locatePath(p, name, root, tail, alt, roots) {
   const tryStat = async (cand) => {
     try { const real = resolvePath(cand); const st = await fsp.stat(real); return { found: true, path: real, isDir: st.isDirectory() }; }
     catch { return null; }
@@ -516,13 +518,28 @@ async function locatePath(p, name, root, tail) {
       }
     }
   }
-  if (name && root) {
-    try {
-      const data = await searchFiles(name, resolvePath(root));
-      const exact = (data.results || []).find((r) => r.name === name);
-      const best = exact || (data.results || [])[0];
-      if (best) return { found: true, path: best.path, isDir: best.isDir, viaSearch: true };
-    } catch { /* */ }
+  // scrollback 回扫候选（最近出现在前）：stat 验证，命中即信——它来自 agent 自己打印的全路径
+  for (const a of String(alt || '').split('\n').filter(Boolean).slice(0, 3)) {
+    const hit = await tryStat(a);
+    if (hit) return { ...hit, viaScrollback: true };
+  }
+  if (name) {
+    // 多根 basename 搜索：终端 cwd + 活跃项目根（前端传来）；同名多个取 mtime 最新（偏向「我刚生成的」）。
+    // 所有根共享一个总截止点，避免点了不存在的名时多根 walk 串成十几秒
+    const budget = Date.now() + 6000;
+    const seen = []; let fuzzy = null;
+    for (const r of [root, ...(roots || [])].filter(Boolean)) {
+      let rr; try { rr = resolvePath(r); } catch { continue; }
+      if (seen.some((d) => rr === d || rr.startsWith(d + path.sep))) continue; // 嵌套根去重
+      seen.push(rr);
+      try {
+        const data = await searchFiles(name, rr, budget);
+        const exact = (data.results || []).filter((x) => x.name === name).sort((a, b) => b.mtime - a.mtime)[0];
+        if (exact) return { found: true, path: exact.path, isDir: exact.isDir, viaSearch: true };
+        if (!fuzzy) fuzzy = (data.results || [])[0];
+      } catch { /* */ }
+    }
+    if (fuzzy) return { found: true, path: fuzzy.path, isDir: fuzzy.isDir, viaSearch: true };
   }
   return { found: false };
 }
@@ -831,6 +848,570 @@ function readBody(req) {
   });
 }
 
+// ---------- Agent 用量（Claude Code / Codex）----------
+// 不依赖两个 CLI 在跑：直接读它们落在本机的会话日志。
+// Claude Code：~/.claude/projects/**/*.jsonl 里每条 assistant 消息带 usage（token 明细）→ 增量解析聚合
+// Codex：~/.codex/sessions/**/rollout-*.jsonl 的 token_count 事件带 rate_limits（5h 窗口/周配额百分比，官方数）→ tail 取最新快照
+const CLAUDE_PROJ = path.join(HOME, '.claude', 'projects');
+const CODEX_SESS = path.join(HOME, '.codex', 'sessions');
+const claudeFileCache = new Map(); // file -> { offset, lastMsgId, events: [{t, in, out, cc, cr}] }
+let usageResultCache = { at: 0, data: null };
+
+async function parseClaudeFile(file, stat) {
+  let c = claudeFileCache.get(file);
+  if (!c) { c = { offset: 0, lastMsgId: '', events: [] }; claudeFileCache.set(file, c); }
+  if (stat.size < c.offset) { c.offset = 0; c.lastMsgId = ''; c.events = []; } // 文件被截断重写：重来
+  if (stat.size === c.offset) return c.events;
+  const fh = await fsp.open(file, 'r');
+  let chunk;
+  try {
+    const len = stat.size - c.offset;
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, c.offset);
+    chunk = buf.toString('utf8');
+  } finally { await fh.close(); }
+  // 末尾可能是写到一半的行：留给下一轮，offset 只推进到最后一个完整换行
+  const lastNL = chunk.lastIndexOf('\n');
+  if (lastNL === -1) return c.events;
+  c.offset += Buffer.byteLength(chunk.slice(0, lastNL + 1), 'utf8');
+  for (const line of chunk.slice(0, lastNL).split('\n')) {
+    if (!line.includes('"usage"') || !line.includes('"assistant"')) continue;
+    let d; try { d = JSON.parse(line); } catch { continue; }
+    const m = d && d.message;
+    const u = m && m.usage;
+    if (!u || d.type !== 'assistant') continue;
+    if (m.model === '<synthetic>') continue;
+    if (m.id && m.id === c.lastMsgId) continue; // 同一条消息分多行落盘，usage 重复：只记第一次
+    if (m.id) c.lastMsgId = m.id;
+    const t = Date.parse(d.timestamp || '') || stat.mtimeMs;
+    c.events.push({ t, in: u.input_tokens || 0, out: u.output_tokens || 0, cc: u.cache_creation_input_tokens || 0, cr: u.cache_read_input_tokens || 0 });
+  }
+  return c.events;
+}
+
+async function claudeUsage() {
+  const cutoff = Date.now() - 8 * 86400000;
+  const files = [];
+  let dirs;
+  try { dirs = await fsp.readdir(CLAUDE_PROJ); } catch { return null; } // 没装/没用过 Claude Code
+  await Promise.all(dirs.map(async (d) => {
+    let names;
+    try { names = await fsp.readdir(path.join(CLAUDE_PROJ, d)); } catch { return; }
+    await Promise.all(names.filter((n) => n.endsWith('.jsonl')).map(async (n) => {
+      const fp = path.join(CLAUDE_PROJ, d, n);
+      try { const st = await fsp.stat(fp); if (st.mtimeMs >= cutoff) files.push({ fp, st }); } catch { /* */ }
+    }));
+  }));
+  const live = new Set(files.map((f) => f.fp));
+  for (const k of claudeFileCache.keys()) { if (!live.has(k)) claudeFileCache.delete(k); } // 过期文件出缓存
+  const all = [];
+  for (const { fp, st } of files) { try { all.push(...await parseClaudeFile(fp, st)); } catch { /* 单文件坏不挡整体 */ } }
+  const now = Date.now();
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const mk = () => ({ total: 0, input: 0, output: 0, cacheRead: 0, cacheCreate: 0, msgs: 0 });
+  const last5h = mk(), today = mk(), week = mk();
+  for (const e of all) {
+    const tot = e.in + e.out + e.cc + e.cr;
+    for (const [b, from] of [[last5h, now - 5 * 3600000], [today, dayStart.getTime()], [week, now - 7 * 86400000]]) {
+      if (e.t >= from) { b.total += tot; b.input += e.in; b.output += e.out; b.cacheRead += e.cr; b.cacheCreate += e.cc; b.msgs++; }
+    }
+  }
+  return { last5h, today, week };
+}
+
+// 从最近改动的 rollout 文件尾部抓最后一条带 rate_limits 的 token_count（官方配额快照）
+async function codexUsage() {
+  const files = [];
+  const walk = async (dir, depth) => {
+    let names;
+    try { names = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const n of names) {
+      const fp = path.join(dir, n.name);
+      if (n.isDirectory() && depth < 3) await walk(fp, depth + 1);
+      else if (n.isFile() && n.name.endsWith('.jsonl')) {
+        try { const st = await fsp.stat(fp); files.push({ fp, mtimeMs: st.mtimeMs, size: st.size }); } catch { /* */ }
+      }
+    }
+  };
+  await walk(CODEX_SESS, 0);
+  if (!files.length) return null;
+  files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const f of files.slice(0, 10)) { // 最新几个会话里找；都没有就放弃
+    try {
+      const fh = await fsp.open(f.fp, 'r');
+      let txt;
+      try {
+        const len = Math.min(f.size, 262144);
+        const buf = Buffer.alloc(len);
+        await fh.read(buf, 0, len, f.size - len);
+        txt = buf.toString('utf8');
+      } finally { await fh.close(); }
+      const lines = txt.split('\n').reverse();
+      for (const line of lines) {
+        if (!line.includes('"rate_limits"')) continue;
+        let d; try { d = JSON.parse(line); } catch { continue; }
+        const pl = d && d.payload;
+        const rl = pl && pl.rate_limits;
+        if (!rl || (!rl.primary && !rl.secondary)) continue;
+        const capturedAt = Date.parse(d.timestamp || '') || f.mtimeMs;
+        // 快照是「当时」的数：窗口在快照之后重置过的话，旧百分比就完全失真（比如 21 小时前
+        // 的 5h 窗口 57%），归零并标 stale——没有新会话日志就说明重置后根本没用过
+        const win = (w) => {
+          if (!w) return null;
+          let resetsAt = w.resets_at || 0;
+          if (typeof resetsAt === 'string') resetsAt = Math.floor(Date.parse(resetsAt) / 1000) || 0;
+          let end = resetsAt * 1000;
+          if (!end && w.resets_in_seconds != null) end = capturedAt + w.resets_in_seconds * 1000;
+          if (!end && w.window_minutes) end = capturedAt + w.window_minutes * 60000;
+          const stale = !!end && end < Date.now();
+          return { usedPercent: stale ? 0 : w.used_percent, windowMinutes: w.window_minutes, resetsAt: stale ? 0 : resetsAt, stale };
+        };
+        return { planType: rl.plan_type || '', capturedAt, primary: win(rl.primary), secondary: win(rl.secondary) };
+      }
+    } catch { /* 下一个文件 */ }
+  }
+  return null;
+}
+
+// Claude Code 官方限额窗口（和它 /usage 面板同源）：5h 滚动窗口 + 周配额的百分比和重置时间。
+// 本地 jsonl 只有 token 流水、推不出官方百分比，必须拿 Claude Code 自己的 OAuth token
+// （macOS 在 Keychain，其他平台落在 ~/.claude/.credentials.json）查官方 usage 接口。
+// 这是本服务唯一的出网请求，只发往 api.anthropic.com——Claude Code 平时也在发同一个请求。
+async function claudeOAuthToken() {
+  const pick = (raw) => {
+    const o = JSON.parse(raw).claudeAiOauth;
+    return o && o.accessToken && (!o.expiresAt || o.expiresAt > Date.now()) ? o.accessToken : null;
+  };
+  if (PLATFORM === 'darwin') {
+    try {
+      const out = await new Promise((resolve, reject) => {
+        execFile('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+          { timeout: 3000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+      });
+      const t = pick(out);
+      if (t) return t;
+    } catch { /* 落到凭证文件 */ }
+  }
+  try { return pick(await fsp.readFile(path.join(HOME, '.claude', '.credentials.json'), 'utf8')); }
+  catch { return null; }
+}
+
+// 终端启动时 curl 自己会认 http_proxy 等环境变量；但打包 App 从 Finder/Dock 启动没有这些变量，
+// curl 直连 api.anthropic.com 会被 403 地域拦截。此时读 macOS 系统代理（Clash 等都会写进去）兜底。
+async function curlSysProxyLine() {
+  if (['https_proxy', 'HTTPS_PROXY', 'http_proxy', 'HTTP_PROXY', 'all_proxy', 'ALL_PROXY'].some((k) => process.env[k])) return '';
+  if (PLATFORM !== 'darwin') return '';
+  try {
+    const out = await new Promise((resolve, reject) => {
+      execFile('scutil', ['--proxy'], { timeout: 3000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    });
+    const grab = (k) => (out.match(new RegExp(`\\b${k} : (\\S+)`)) || [])[1];
+    if (grab('HTTPSEnable') === '1') return `proxy = "http://${grab('HTTPSProxy')}:${grab('HTTPSPort')}"\n`;
+    if (grab('HTTPEnable') === '1') return `proxy = "http://${grab('HTTPProxy')}:${grab('HTTPPort')}"\n`;
+    if (grab('SOCKSEnable') === '1') return `proxy = "socks5h://${grab('SOCKSProxy')}:${grab('SOCKSPort')}"\n`;
+  } catch { /* 读不到就直连 */ }
+  return '';
+}
+
+async function claudeOfficialLimits() {
+  const token = await claudeOAuthToken();
+  if (!token) return null;
+  // 不用 Node https：该接口的防护按 TLS 指纹拦——同样的请求头 curl 能 200、Node 直接 403。
+  // 走系统 curl（macOS/Win10+ 自带），顺带继承用户的代理环境变量；
+  // token 经 stdin 的 curl 配置传入，不暴露在进程列表里
+  const proxyLine = await curlSysProxyLine();
+  const body = await new Promise((resolve, reject) => {
+    const cp = execFile('curl', ['-sS', '--max-time', '8', '-K', '-', 'https://api.anthropic.com/api/oauth/usage'],
+      { timeout: 10000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    cp.stdin.end(`${proxyLine}header = "Authorization: Bearer ${token}"\nheader = "anthropic-beta: oauth-2025-04-20"\n`);
+  });
+  const d = JSON.parse(body);
+  const win = (w) => (w && w.utilization != null)
+    ? { usedPercent: w.utilization, resetsAt: w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) : 0 }
+    : null;
+  const fiveHour = win(d.five_hour), sevenDay = win(d.seven_day);
+  return (fiveHour || sevenDay) ? { fiveHour, sevenDay } : null;
+}
+
+// ---------- Agent 项目（最近被 coding agent 处理过的项目文件夹）----------
+// Claude Code：~/.claude/projects/<munge过的路径>/*.jsonl，目录名不可逆，但行里带 "cwd":"真实路径"
+// Codex：~/.codex/sessions/**/rollout-*.jsonl 开头的 session_meta 带 cwd
+let agentProjCache = { at: 0, data: null };
+
+async function readCwdFromHead(file, bytes) {
+  const fh = await fsp.open(file, 'r');
+  try {
+    const buf = Buffer.alloc(bytes);
+    const { bytesRead } = await fh.read(buf, 0, bytes, 0);
+    const m = buf.toString('utf8', 0, bytesRead).match(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    return m ? JSON.parse('"' + m[1] + '"') : null;
+  } finally { await fh.close(); }
+}
+
+async function agentProjects() {
+  if (agentProjCache.data && Date.now() - agentProjCache.at < 60000) return agentProjCache.data;
+  const cutoff = Date.now() - 30 * 86400000;
+  const map = new Map(); // cwd -> { lastActive, agents: Set }
+  const add = (cwd, t, agent) => {
+    if (!cwd || cwd === HOME) return; // 在家目录裸跑的会话不算「项目」
+    const cur = map.get(cwd) || { lastActive: 0, agents: new Set() };
+    cur.lastActive = Math.max(cur.lastActive, t);
+    cur.agents.add(agent);
+    map.set(cwd, cur);
+  };
+  // Claude Code：每个项目目录取最新的 jsonl，从文件头抓 cwd
+  try {
+    const dirs = await fsp.readdir(CLAUDE_PROJ);
+    await Promise.all(dirs.map(async (d) => {
+      const base = path.join(CLAUDE_PROJ, d);
+      let names; try { names = await fsp.readdir(base); } catch { return; }
+      let newest = null;
+      await Promise.all(names.filter((n) => n.endsWith('.jsonl')).map(async (n) => {
+        try {
+          const st = await fsp.stat(path.join(base, n));
+          if (!newest || st.mtimeMs > newest.mtimeMs) newest = { fp: path.join(base, n), mtimeMs: st.mtimeMs };
+        } catch { /* */ }
+      }));
+      if (!newest || newest.mtimeMs < cutoff) return;
+      try { add(await readCwdFromHead(newest.fp, 65536), newest.mtimeMs, 'claude'); } catch { /* */ }
+    }));
+  } catch { /* 没用过 Claude Code */ }
+  // Codex：最近改动的 rollout 文件头部抓 cwd（数量封顶，控制 IO）
+  try {
+    const files = [];
+    const walk = async (dir, depth) => {
+      let names;
+      try { names = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+      for (const n of names) {
+        const fp = path.join(dir, n.name);
+        if (n.isDirectory() && depth < 3) await walk(fp, depth + 1);
+        else if (n.isFile() && n.name.endsWith('.jsonl')) {
+          try { const st = await fsp.stat(fp); if (st.mtimeMs >= cutoff) files.push({ fp, mtimeMs: st.mtimeMs }); } catch { /* */ }
+        }
+      }
+    };
+    await walk(CODEX_SESS, 0);
+    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    await Promise.all(files.slice(0, 40).map(async (f) => {
+      try { add(await readCwdFromHead(f.fp, 16384), f.mtimeMs, 'codex'); } catch { /* */ }
+    }));
+  } catch { /* 没用过 Codex */ }
+  // 按最近活跃排序，已被删除的项目目录剔掉
+  const sorted = [...map.entries()].sort((a, b) => b[1].lastActive - a[1].lastActive);
+  const projects = [];
+  for (const [cwd, info] of sorted) {
+    if (projects.length >= 12) break;
+    try { if (!(await fsp.stat(cwd)).isDirectory()) continue; } catch { continue; }
+    projects.push({ path: cwd, name: path.basename(cwd), agents: [...info.agents], lastActive: info.lastActive });
+  }
+  const data = { ok: true, projects };
+  agentProjCache = { at: Date.now(), data };
+  return data;
+}
+
+// ---------- Skills 透视（本机 agent skills 的扫描 / 触发统计 / 健康检查 / 启停）----------
+// 扫描五类来源：~/.claude/skills、最近 agent 项目的 .claude/skills、Claude 插件、
+// ~/.codex/skills、~/.agents/skills。触发统计读两家的会话日志。
+// 启停不走 skillOverrides（官方 #50631：用户级配置当前不生效）——用「移入 _disabled/ 子目录」
+// 实现：两家 CLI 都只扫一层目录，移进去立即对模型不可见，移回来即恢复，可靠且可逆。
+const CLAUDE_SKILLS = path.join(HOME, '.claude', 'skills');
+const CODEX_SKILLS = path.join(HOME, '.codex', 'skills');
+const AGENTS_SKILLS = path.join(HOME, '.agents', 'skills');
+const SKILL_DESC_CUT = 1536; // Claude Code 单条 description 的截断线（官方文档）
+const SKILL_BUDGET_CHARS = 15000; // 描述总预算的社区实测估算值（窗口的 1%），仅作预警参考
+let skillsCache = { at: 0, data: null };
+
+function skillFrontmatter(txt) {
+  const m = txt.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
+  if (!m) return null;
+  const fm = m[1];
+  // 不用 m 标志：$ 必须是整段 frontmatter 的末尾，否则块标量（description: >- 换行缩进正文）会被截成空
+  const dm = fm.match(/(?:^|\r?\n)description\s*:\s*([\s\S]*?)(?=\r?\n[\w-]+\s*:|\s*$)/);
+  let desc = dm ? dm[1].trim() : '';
+  desc = desc.replace(/^[|>][+-]?\s*/, '').replace(/^(['"])([\s\S]*)\1$/, '$2').trim();
+  return { desc };
+}
+
+async function scanSkillRoot(root, source, label, out, disabled = false) {
+  let names;
+  try { names = await fsp.readdir(root, { withFileTypes: true }); } catch { return; }
+  for (const n of names) {
+    if (n.name.startsWith('.') || n.name === '_archive' || n.name === '_backups') continue;
+    const fp = path.join(root, n.name);
+    if (n.name === '_disabled') {
+      if (n.isDirectory() && !disabled) await scanSkillRoot(fp, source, label, out, true);
+      continue;
+    }
+    let isDir = n.isDirectory();
+    if (!isDir && n.isSymbolicLink()) { // skills.sh 等安装器常用软链，跟随解析
+      try { isDir = (await fsp.stat(fp)).isDirectory(); } catch { continue; }
+    }
+    if (!isDir) {
+      if (/\.md$/i.test(n.name)) continue; // 根目录的说明文档不算残留
+      out.push({ name: n.name, dir: fp, source, label, disabled, residue: true, desc: '', descLen: 0, mtime: 0,
+        issues: ['残留文件——不是有效 skill，只占目录'] });
+      continue;
+    }
+    const item = { name: n.name, dir: fp, source, label, disabled, residue: false, desc: '', descLen: 0, mtime: 0, issues: [] };
+    try {
+      const sm = path.join(fp, 'SKILL.md');
+      const st = await fsp.stat(sm);
+      item.mtime = st.mtimeMs;
+      const fh = await fsp.open(sm, 'r');
+      let head;
+      try {
+        const buf = Buffer.alloc(Math.min(st.size, 32768));
+        const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+        head = buf.toString('utf8', 0, bytesRead);
+      } finally { await fh.close(); }
+      const fm = skillFrontmatter(head);
+      if (!fm || !fm.desc) {
+        item.issues.push('SKILL.md 缺 frontmatter description——模型的技能清单里看不到它，只能手动调用');
+      } else {
+        item.desc = fm.desc.slice(0, 240);
+        item.descLen = fm.desc.length;
+        if (fm.desc.length > SKILL_DESC_CUT) {
+          item.issues.push(`description ${fm.desc.length.toLocaleString()} 字符，超过 ${SKILL_DESC_CUT} 截断线——第 ${SKILL_DESC_CUT} 字符之后的触发词模型看不见`);
+        }
+      }
+    } catch {
+      item.residue = true;
+      item.issues.push('缺 SKILL.md——不是有效 skill');
+    }
+    out.push(item);
+  }
+}
+
+// Claude Code 触发统计：jsonl 里的 Skill tool_use（模型自动触发）+ <command-name>（用户手动 /调用）
+const claudeSkillStatCache = new Map(); // file -> { offset, events: [{t, skill}] }
+async function claudeSkillEvents(cutoff) {
+  const files = [];
+  let dirs;
+  try { dirs = await fsp.readdir(CLAUDE_PROJ); } catch { return []; }
+  await Promise.all(dirs.map(async (d) => {
+    let names;
+    try { names = await fsp.readdir(path.join(CLAUDE_PROJ, d)); } catch { return; }
+    await Promise.all(names.filter((n) => n.endsWith('.jsonl')).map(async (n) => {
+      const fp = path.join(CLAUDE_PROJ, d, n);
+      try { const st = await fsp.stat(fp); if (st.mtimeMs >= cutoff) files.push({ fp, st }); } catch { /* */ }
+    }));
+  }));
+  const live = new Set(files.map((f) => f.fp));
+  for (const k of claudeSkillStatCache.keys()) { if (!live.has(k)) claudeSkillStatCache.delete(k); }
+  const all = [];
+  for (const { fp, st } of files) {
+    let c = claudeSkillStatCache.get(fp);
+    if (!c) { c = { offset: 0, events: [] }; claudeSkillStatCache.set(fp, c); }
+    if (st.size < c.offset) { c.offset = 0; c.events = []; }
+    if (st.size > c.offset) {
+      try {
+        const fh = await fsp.open(fp, 'r');
+        let chunk;
+        try {
+          const buf = Buffer.alloc(st.size - c.offset);
+          await fh.read(buf, 0, buf.length, c.offset);
+          chunk = buf.toString('utf8');
+        } finally { await fh.close(); }
+        const lastNL = chunk.lastIndexOf('\n');
+        if (lastNL !== -1) {
+          c.offset += Buffer.byteLength(chunk.slice(0, lastNL + 1), 'utf8');
+          for (const line of chunk.slice(0, lastNL).split('\n')) {
+            const isTool = line.includes('"name":"Skill"');
+            const isCmd = line.includes('<command-name>');
+            if (!isTool && !isCmd) continue;
+            const t = Date.parse((line.match(/"timestamp":"([^"]+)"/) || [])[1] || '') || st.mtimeMs;
+            if (isTool) {
+              let d; try { d = JSON.parse(line); } catch { continue; }
+              const content = d && d.message && Array.isArray(d.message.content) ? d.message.content : [];
+              for (const it of content) {
+                if (it.type === 'tool_use' && it.name === 'Skill' && it.input && it.input.skill) {
+                  c.events.push({ t, skill: String(it.input.skill).replace(/^.*:/, '') });
+                }
+              }
+            } else {
+              const m = line.match(/<command-name>\s*\/?([\w.:-]+)\s*<\/command-name>/);
+              if (m) c.events.push({ t, skill: m[1].replace(/^.*:/, '') });
+            }
+          }
+        }
+      } catch { /* 单文件坏不挡整体 */ }
+    }
+    all.push(...c.events);
+  }
+  return all.filter((e) => e.t >= cutoff);
+}
+
+// Codex 触发统计：rollout 里被激活的 skill 以 "<skill>\n<name>X</name>" 注入——按「会话×skill」去重计数
+const codexSkillStatCache = new Map(); // file -> { size, skills: [{t, skill}] }
+async function codexSkillEvents(cutoff) {
+  const files = [];
+  const walk = async (dir, depth) => {
+    let names;
+    try { names = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const n of names) {
+      const fp = path.join(dir, n.name);
+      if (n.isDirectory() && depth < 3) await walk(fp, depth + 1);
+      else if (n.isFile() && n.name.endsWith('.jsonl')) {
+        try { const st = await fsp.stat(fp); if (st.mtimeMs >= cutoff) files.push({ fp, st }); } catch { /* */ }
+      }
+    }
+  };
+  await walk(CODEX_SESS, 0);
+  const live = new Set(files.map((f) => f.fp));
+  for (const k of codexSkillStatCache.keys()) { if (!live.has(k)) codexSkillStatCache.delete(k); }
+  const all = [];
+  for (const { fp, st } of files) {
+    let c = codexSkillStatCache.get(fp);
+    if (!c || c.size !== st.size) {
+      c = { size: st.size, skills: [] };
+      try {
+        const txt = await fsp.readFile(fp, 'utf8');
+        const seen = new Set();
+        const re = /<skill>\\n<name>([\w.:-]+)<\/name>/g;
+        let m;
+        while ((m = re.exec(txt))) {
+          if (seen.has(m[1])) continue;
+          seen.add(m[1]);
+          c.skills.push({ t: st.mtimeMs, skill: m[1] });
+        }
+      } catch { /* */ }
+      codexSkillStatCache.set(fp, c);
+    }
+    all.push(...c.skills);
+  }
+  return all;
+}
+
+async function skillsData() {
+  if (skillsCache.data && Date.now() - skillsCache.at < 30000) return skillsCache.data;
+  const cutoff = Date.now() - 45 * 86400000;
+  const items = [];
+  await scanSkillRoot(CLAUDE_SKILLS, 'claude', '~/.claude', items);
+  await scanSkillRoot(CODEX_SKILLS, 'codex', '~/.codex', items);
+  await scanSkillRoot(AGENTS_SKILLS, 'agents', '~/.agents', items);
+  // Claude 插件自带的 skills
+  try {
+    const inst = JSON.parse(await fsp.readFile(path.join(HOME, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'));
+    for (const [key, arr] of Object.entries(inst.plugins || {})) {
+      for (const p of arr || []) {
+        if (p.installPath) await scanSkillRoot(path.join(p.installPath, 'skills'), 'plugin', key.split('@')[0], items);
+      }
+    }
+  } catch { /* 没装插件 */ }
+  // 最近 agent 项目的项目级 skills
+  try {
+    const pj = await agentProjects();
+    for (const p of pj.projects || []) {
+      await scanSkillRoot(path.join(p.path, '.claude', 'skills'), 'project', p.name, items);
+    }
+  } catch { /* */ }
+
+  // 触发统计合并（按 skill 名聚合两端事件）
+  const [ce, xe] = await Promise.all([
+    claudeSkillEvents(cutoff).catch(() => []),
+    codexSkillEvents(cutoff).catch(() => []),
+  ]);
+  const stats = new Map();
+  for (const e of [...ce, ...xe]) {
+    const s = stats.get(e.skill) || { hits: 0, last: 0 };
+    s.hits++; s.last = Math.max(s.last, e.t);
+    stats.set(e.skill, s);
+  }
+  // 跨来源副本：同名 skill 出现在几处
+  const copies = new Map();
+  for (const it of items) {
+    if (it.residue) continue;
+    const arr = copies.get(it.name) || [];
+    arr.push(it.label + '/skills' + (it.disabled ? '/_disabled' : ''));
+    copies.set(it.name, arr);
+  }
+  for (const it of items) {
+    const st = stats.get(it.name);
+    it.hits = st ? st.hits : 0;
+    it.last = st ? st.last : 0;
+    const cp = copies.get(it.name) || [];
+    it.copies = cp.length > 1 ? cp : null;
+  }
+  // 预算：每个 Claude 会话都常驻的部分（全局 + 插件）；项目级只在对应项目生效，不计入
+  let budgetChars = 0;
+  for (const it of items) {
+    if (!it.disabled && !it.residue && (it.source === 'claude' || it.source === 'plugin')) budgetChars += it.descLen;
+  }
+  const enabled = items.filter((it) => !it.disabled && !it.residue);
+  const data = {
+    ok: true, at: Date.now(),
+    items,
+    roots: { claude: CLAUDE_SKILLS, codex: CODEX_SKILLS, agents: AGENTS_SKILLS },
+    overview: {
+      total: items.filter((it) => !it.residue).length,
+      unique: new Set(items.filter((it) => !it.residue).map((it) => it.name)).size,
+      active: enabled.filter((it) => it.hits > 0).length,
+      totalHits: enabled.reduce((a, b) => a + b.hits, 0),
+      dust: enabled.filter((it) => it.hits === 0).length,
+      issues: items.filter((it) => it.issues.length).length,
+      budgetChars, budgetLimit: SKILL_BUDGET_CHARS, descCut: SKILL_DESC_CUT,
+    },
+  };
+  skillsCache = { at: Date.now(), data };
+  return data;
+}
+
+// 启停/卸载的路径校验：只允许动「最近一次扫描出来的 skill 目录」，杜绝任意路径移动/删除
+async function validateSkillDir(dir) {
+  if (!skillsCache.data) await skillsData();
+  const target = path.resolve(String(dir || ''));
+  const it = (skillsCache.data.items || []).find((x) => x.dir === target);
+  if (!it) return { ok: false, error: '不在已扫描的 skills 清单里' };
+  return { ok: true, item: it };
+}
+
+async function skillToggle(dir, enable) {
+  const v = await validateSkillDir(dir);
+  if (!v.ok) return v;
+  const it = v.item;
+  if (it.residue) return { ok: false, error: '残留文件不能启停，请直接清理' };
+  if (!!enable === !it.disabled) return { ok: true, dir: it.dir }; // 已是目标状态
+  const root = it.disabled ? path.dirname(path.dirname(it.dir)) : path.dirname(it.dir);
+  const dest = enable ? path.join(root, it.name) : path.join(root, '_disabled', it.name);
+  try {
+    if (!enable) await fsp.mkdir(path.join(root, '_disabled'), { recursive: true });
+    await fsp.access(dest).then(() => { throw new Error('目标位置已有同名目录'); }, () => {});
+    // skills.sh 等安装器装的是相对路径 symlink（../../.agents/...）——直接 rename 会因层级变化断链，
+    // 改为解析出绝对目标后删旧链建新链；真实目录才走 rename
+    const lst = await fsp.lstat(it.dir);
+    if (lst.isSymbolicLink()) {
+      const target = await fsp.realpath(it.dir);
+      await fsp.unlink(it.dir);
+      await fsp.symlink(target, dest);
+    } else {
+      await fsp.rename(it.dir, dest);
+    }
+  } catch (e) { return { ok: false, error: e.message }; }
+  skillsCache = { at: 0, data: null };
+  return { ok: true, dir: dest };
+}
+
+async function skillTrash(dir) {
+  const v = await validateSkillDir(dir);
+  if (!v.ok) return v;
+  const r = await trashPath(v.item.dir);
+  if (r.ok) skillsCache = { at: 0, data: null };
+  return r;
+}
+
+async function agentUsage() {
+  if (usageResultCache.data && Date.now() - usageResultCache.at < 30000) return usageResultCache.data;
+  const [claude, codex, claudeLimits] = await Promise.all([
+    claudeUsage().catch(() => null),
+    codexUsage().catch(() => null),
+    claudeOfficialLimits().catch(() => null),
+  ]);
+  const claudeOut = (claude || claudeLimits) ? { ...(claude || {}), official: claudeLimits } : null;
+  const data = { ok: true, at: Date.now(), claude: claudeOut, codex };
+  usageResultCache = { at: Date.now(), data };
+  return data;
+}
+
 // ---------- 路由 ----------
 
 // 只接受指向本机回环地址的 Host。挡住 DNS rebinding：恶意网页把自己的域名重绑定到
@@ -841,18 +1422,19 @@ function hostAllowed(req) {
   const host = (req.headers.host || '').replace(/:\d+$/, '');
   return ALLOWED_HOSTS.has(host);
 }
-
-// ---------- AI 对话面板（/api/ai/*）：多家模型接入 + 文件工具 agent 循环，见 ai.js ----------
-const ai = require('./ai.js')({ HOME, PLATFORM, readConfig, updateConfig, resolvePath, searchFiles, grepFiles });
-
-// 挡跨站请求伪造（CSRF，回灌自上游 ffc450c）：text/plain 的 POST 是「简单请求」不触发预检，
-// 仅靠 Host 校验拦不住——任意网页都能 fetch 本机 POST 偷偷改文件/触发 AI 操作。
-// 浏览器强制带的 Origin 头 JS 改不了：非回环 origin 一律拒；无 Origin（同源 GET / curl）放行。
+// 挡跨站请求伪造（CSRF）：写操作全走 POST，而 text/plain 的 POST 是「简单请求」不触发预检，
+// 仅靠 Host 校验拦不住——任意网页都能 fetch 本机 POST 偷偷改文件（响应跨域读不到，但副作用已落地）。
+// 浏览器强制带的 Origin 头 JS 改不了：非回环 origin 一律拒。无 Origin（同源 GET / curl /
+// Electron 主进程 net.fetch）放行；字面 'null'（sandbox iframe / file://）解析失败即拒。
 function originAllowed(req) {
   const o = req.headers.origin;
   if (!o) return true;
   try { return ALLOWED_HOSTS.has(new URL(o).hostname); } catch { return false; }
 }
+
+// ---------- AI 对话面板（/api/ai/*）：多家模型接入 + 文件工具 agent 循环，见 ai.js ----------
+const ai = require('./ai.js')({ HOME, PLATFORM, readConfig, updateConfig, resolvePath, searchFiles, grepFiles });
+
 
 const server = http.createServer(async (req, res) => {
   if (!hostAllowed(req)) { res.writeHead(403); res.end('forbidden host'); return; }
@@ -901,7 +1483,8 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, await recentFiles(qp.get('root') || HOME));
     }
     if (p === '/api/locate') {
-      return sendJSON(res, 200, await locatePath(qp.get('path'), qp.get('name'), qp.get('root'), qp.get('tail')));
+      const extraRoots = String(qp.get('roots') || '').split('\n').filter(Boolean).slice(0, 3);
+      return sendJSON(res, 200, await locatePath(qp.get('path'), qp.get('name'), qp.get('root'), qp.get('tail'), qp.get('alt'), extraRoots));
     }
     if (p === '/api/git') {
       return sendJSON(res, 200, await gitStatus(qp.get('path') || HOME));
@@ -948,6 +1531,23 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/create' && req.method === 'POST') {
       const b = await readBody(req);
       return sendJSON(res, 200, await createEntry(b.path, b.name, b.type));
+    }
+    if (p === '/api/agent-projects') {
+      return sendJSON(res, 200, await agentProjects());
+    }
+    if (p === '/api/skills') {
+      return sendJSON(res, 200, await skillsData());
+    }
+    if (p === '/api/skills/toggle' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await skillToggle(b.dir, !!b.enable));
+    }
+    if (p === '/api/skills/trash' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await skillTrash(b.dir));
+    }
+    if (p === '/api/agent-usage') {
+      return sendJSON(res, 200, await agentUsage());
     }
     if (p === '/api/favorites') {
       if (req.method === 'POST') {
