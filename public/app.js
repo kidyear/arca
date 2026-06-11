@@ -1004,6 +1004,7 @@ async function copyPath(p) {
 function recordRecent(p) {
   if (!p) return;
   state.recentOpened = [p, ...(state.recentOpened || []).filter((x) => x !== p)].slice(0, 30);
+  renderRecents();
   apiPost('/api/recent-open', { path: p }).catch(() => {});
 }
 async function toggleFav(e) {
@@ -1365,6 +1366,55 @@ async function loadFavorites() {
   state.favorites = data.favorites || [];
   state.recentOpened = data.recentOpened || [];
   renderFavs();
+  renderRecents();
+}
+// ---------- 侧栏「最近打开」（公司版：上游 v1.5.2 移除了该区块，按更顺的交互加回）----------
+// 左键：应用内打开（目录跳转、文件原地预览；翻箱预览不了的二进制才交给系统默认应用）
+// 右键：在翻箱打开 / 系统打开 / 访达显示 / 复制路径 / 从列表移除
+function renderRecents() {
+  const ul = $('#recents-list');
+  if (!ul) return;
+  ul.innerHTML = '';
+  const items = (state.recentOpened || []).slice(0, 10);
+  if (!items.length) { ul.innerHTML = '<div class="nav-empty">打开过的文件会出现在这里</div>'; return; }
+  for (const p of items) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="ico">${svgWrap(SVG.file, 'currentColor', 16)}</span><span class="label" title="${escapeHtml(p)}">${escapeHtml(baseOf(p))}</span>`;
+    li.onclick = () => openRecent(p);
+    li.oncontextmenu = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      popupMenu(ev, [
+        { label: '在翻箱中打开', fn: () => openRecent(p) },
+        { label: '用系统默认应用打开', fn: () => openWith(p) },
+        { label: '在 Finder 显示', fn: () => openWith(p, 'reveal') },
+        { label: '复制路径', fn: () => copyPath(p) },
+        { sep: true },
+        { label: '从最近列表移除', danger: true, fn: () => removeRecent(p) },
+      ]);
+    };
+    makeDraggablePath(li, p);
+    ul.appendChild(li);
+  }
+}
+async function openRecent(p) {
+  await navigate(dirOf(p)).catch(() => {});
+  const e = state.entries.find((x) => x.path === p);
+  if (!e) { toast('文件不在原位置了（可能被移动或删除）', true); return; }
+  if (e.isDir) { navigate(p); return; }
+  recordRecent(p);
+  // 翻箱预览不了的格式（docx/压缩包等二进制）→ 系统默认应用；其余原地预览
+  if (e.kind === 'other') { openWith(p); return; }
+  state.selected = p;
+  openPreview(e);
+  renderFiles();
+}
+async function removeRecent(p) {
+  try {
+    const r = await apiPost('/api/recent-open', { path: p, remove: true });
+    state.recentOpened = r.recentOpened || state.recentOpened.filter((x) => x !== p);
+  } catch { state.recentOpened = (state.recentOpened || []).filter((x) => x !== p); }
+  renderRecents();
 }
 function renderFavs() {
   const ul = $('#favs-list');

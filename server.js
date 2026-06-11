@@ -1502,10 +1502,13 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, result);
     }
     if (p === '/api/recent-open' && req.method === 'POST') {
-      // 内部预览/编辑也记入「最近打开」，去重 + 最近优先（串行 RMW）
+      // 内部预览/编辑也记入「最近打开」，去重 + 最近优先（串行 RMW）；带 remove 则从列表移除
       const body = await readBody(req);
       if (body.path) {
-        const cfg = await updateConfig((c) => { c.recentOpened = [body.path, ...(c.recentOpened || []).filter((x) => x !== body.path)].slice(0, 30); });
+        const cfg = await updateConfig((c) => {
+          const rest = (c.recentOpened || []).filter((x) => x !== body.path);
+          c.recentOpened = body.remove ? rest : [body.path, ...rest].slice(0, 30);
+        });
         return sendJSON(res, 200, { ok: true, recentOpened: cfg.recentOpened });
       }
       return sendJSON(res, 200, { ok: false });
