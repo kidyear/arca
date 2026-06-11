@@ -897,6 +897,30 @@ async function gitFileDiff(p) {
 }
 
 // 图片编辑保存：前端 canvas 导出 dataURL（已含格式/尺寸/质量/标注），这里原子写回
+// 二进制覆盖写（Word 编辑器保存 docx 用）：base64 进，原子写 + mtime 冲突守卫
+async function writeBinary({ path: target, base64, expectedMtime }) {
+  if (!base64) throw new Error('没有数据');
+  const dest = resolvePath(target);
+  if (expectedMtime) {
+    try {
+      const st = await fsp.stat(dest);
+      if (Math.abs(st.mtimeMs - expectedMtime) > 1) {
+        const e = new Error('文件在外部被修改过，为防覆盖已取消保存（重新打开后再编辑）');
+        e.conflict = true; throw e;
+      }
+    } catch (err) { if (err.conflict) throw err; /* 文件不存在视为新建 */ }
+  }
+  const buf = Buffer.from(base64, 'base64');
+  const tmp = `${dest}.fanbox-tmp-${process.pid}-${Date.now()}`;
+  try {
+    const fh = await fsp.open(tmp, 'w');
+    try { await fh.writeFile(buf); await fh.sync(); } finally { await fh.close(); }
+    await fsp.rename(tmp, dest);
+  } catch (e) { await fsp.unlink(tmp).catch(() => {}); throw e; }
+  const st = await fsp.stat(dest);
+  return { ok: true, path: dest, size: st.size, mtime: st.mtimeMs };
+}
+
 async function saveImage({ path: target, dataUrl, newName }) {
   const m = /^data:image\/\w+;base64,(.+)$/s.exec(dataUrl || '');
   if (!m) throw new Error('无效图片数据');
@@ -1863,6 +1887,11 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       try { return sendJSON(res, 200, await saveImage(body)); }
       catch (e) { return sendJSON(res, 200, { error: e.message }); }
+    }
+    if (p === '/api/write-binary' && req.method === 'POST') {
+      const body = await readBody(req);
+      try { return sendJSON(res, 200, await writeBinary(body)); }
+      catch (e) { return sendJSON(res, 200, { ok: false, conflict: !!e.conflict, error: e.message }); }
     }
     if (p === '/api/create' && req.method === 'POST') {
       const b = await readBody(req);

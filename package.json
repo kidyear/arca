@@ -15,7 +15,9 @@
     "check:vendor-patch": "grep -q '20===e.keyCode||229===e.keyCode' public/vendor/xterm/xterm.js",
     "predist": "npm run check:vendor-patch",
     "dist": "electron-builder --mac",
-    "dist:win": "electron-rebuild -f -w node-pty && electron-builder --win"
+    "dist:win": "electron-rebuild -f -w node-pty && electron-builder --win",
+    "build:docx": "esbuild src-vendor/docx-entry.jsx --bundle --format=iife --minify --jsx=automatic --define:process.env.NODE_ENV=\\\"production\\\" --outfile=public/vendor/docx/docx-editor.js --loader:.woff=file --loader:.woff2=file --loader:.ttf=file --loader:.svg=dataurl --loader:.png=dataurl",
+    "build:xlsx": "esbuild src-vendor/xlsx-entry.js --bundle --format=iife --minify --outfile=public/vendor/xlsx/xlsx.js"
   },
   "build": {
     "appId": "com.huashu.fanbox",
@@ -80,6 +82,7 @@
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
+    "@eigenpal/docx-editor-react": "^1.4.0",
     "@electron/rebuild": "^3.7.0",
     "@milkdown/crepe": "^7.21.2",
     "electron": "^33.2.0",
@@ -87,7 +90,10 @@
     "esbuild": "^0.28.0",
     "highlight.js": "^11.11.1",
     "marked": "^12.0.2",
-    "monaco-editor": "^0.52.2"
+    "monaco-editor": "^0.52.2",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "xlsx": "^0.18.5"
   },
   "license": "MIT"
 }

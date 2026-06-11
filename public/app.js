@@ -524,15 +524,119 @@ function cursorEnter(editor) {
 }
 
 // ---------- 预览 ----------
+// ---------- Office 预览（公司版）：Word 原格式编辑保存，Excel 表格预览 ----------
+// 组件 vendor 在本地（docx-editor / SheetJS，均 Apache-2.0），离线可用，文件不出本机
+const OFFICE_DOCX = /\.docx$/i;
+const OFFICE_XLSX = /\.(xlsx|xls|xlsm)$/i;
+const isOfficeName = (n) => OFFICE_DOCX.test(n) || OFFICE_XLSX.test(n);
+const _vendorOnce = {};
+function loadVendor(key, js, css) {
+  if (_vendorOnce[key]) return _vendorOnce[key];
+  _vendorOnce[key] = new Promise((resolve, reject) => {
+    if (css) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = css; document.head.appendChild(l); }
+    const s = document.createElement('script');
+    s.src = js;
+    s.onload = resolve;
+    s.onerror = () => { _vendorOnce[key] = null; reject(new Error('组件加载失败')); };
+    document.head.appendChild(s);
+  });
+  return _vendorOnce[key];
+}
+function abToBase64(ab) {
+  const u8 = new Uint8Array(ab);
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const docxKit = {
+  handle: null, dirty: false, mtime: 0,
+  dispose() { if (this.handle) { try { this.handle.destroy(); } catch { /* */ } this.handle = null; } this.dirty = false; },
+};
+async function openDocxPreview(e) {
+  const body = $('#preview-body');
+  body.innerHTML = '<div class="cmdk-loading">加载 Word 编辑器…</div>';
+  try {
+    await loadVendor('docx', '/vendor/docx/docx-editor.js', '/vendor/docx/docx-editor.css');
+    const r = await fetch(`/api/raw?path=${encodeURIComponent(e.path)}&v=${e.mtime || 0}`);
+    if (!r.ok) throw new Error('读取文件失败');
+    const buf = await r.arrayBuffer();
+    body.innerHTML = '<div class="editor-bar"><button id="docx-save" class="primary">保存</button><button id="docx-sys" class="ghost-btn">用系统应用打开</button><span id="docx-state" class="editor-hint">原格式（OOXML）编辑，改完点保存</span></div><div id="docx-host" class="docx-host"></div>';
+    docxKit.mtime = e.mtime || 0;
+    docxKit.dirty = false;
+    const t0 = Date.now(); // 编辑器装载文档也会触发 onChange，前 1.2 秒不算「用户改动」
+    docxKit.handle = window.FanboxDocx.mount($('#docx-host'), buf, {
+      onChange: () => {
+        if (Date.now() - t0 < 1200 || docxKit.dirty) return;
+        docxKit.dirty = true;
+        const st = $('#docx-state'); if (st) st.textContent = '● 有未保存的修改';
+      },
+    });
+    dirtyCheck = () => docxKit.dirty;
+    $('#docx-sys').onclick = () => openWith(e.path);
+    $('#docx-save').onclick = async () => {
+      const btn = $('#docx-save');
+      btn.disabled = true;
+      try {
+        const ab = await docxKit.handle.save();
+        if (!ab) throw new Error('编辑器没有返回内容');
+        const r2 = await apiPost('/api/write-binary', { path: e.path, base64: abToBase64(ab), expectedMtime: docxKit.mtime });
+        if (!r2.ok) throw new Error(r2.error || '保存失败');
+        docxKit.mtime = r2.mtime; e.mtime = r2.mtime; docxKit.dirty = false;
+        const st = $('#docx-state'); if (st) st.textContent = '已保存 ✓';
+        toast('已保存（.docx 原格式，Word 可直接打开）');
+        recordRecent(e.path);
+      } catch (err) { toast('保存失败: ' + err.message, true); }
+      btn.disabled = false;
+    };
+    recordRecent(e.path);
+  } catch (err) {
+    body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>Word 预览失败：${escapeHtml(err.message)}<br><br><button class="ghost-btn" id="docx-fallback">用系统应用打开</button></div>`;
+    const fb = $('#docx-fallback'); if (fb) fb.onclick = () => openWith(e.path);
+  }
+}
+async function openXlsxPreview(e) {
+  const body = $('#preview-body');
+  body.innerHTML = '<div class="cmdk-loading">解析表格…</div>';
+  try {
+    await loadVendor('xlsx', '/vendor/xlsx/xlsx.js');
+    const r = await fetch(`/api/raw?path=${encodeURIComponent(e.path)}&v=${e.mtime || 0}`);
+    if (!r.ok) throw new Error('读取文件失败');
+    const sheets = window.FanboxXlsx.parse(await r.arrayBuffer());
+    if (!sheets.length) throw new Error('没有工作表');
+    body.innerHTML = '<div class="editor-bar"><span class="xlsx-tabs" id="xlsx-tabs"></span><span class="chat-flex"></span><button id="xlsx-sys" class="ghost-btn">用系统应用编辑</button></div><div id="xlsx-host" class="xlsx-host"></div>';
+    const tabs = $('#xlsx-tabs');
+    const show = (i) => {
+      $('#xlsx-host').innerHTML = sheets[i].html || '<div class="empty-state">空工作表</div>';
+      tabs.querySelectorAll('button').forEach((b, j) => b.classList.toggle('on', i === j));
+    };
+    sheets.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.className = 'xlsx-tab';
+      b.textContent = s.name;
+      b.onclick = () => show(i);
+      tabs.appendChild(b);
+    });
+    $('#xlsx-sys').onclick = () => openWith(e.path);
+    show(0);
+    recordRecent(e.path);
+  } catch (err) {
+    body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>表格解析失败：${escapeHtml(err.message)}<br><br><button class="ghost-btn" id="xlsx-fallback">用系统应用打开</button></div>`;
+    const fb = $('#xlsx-fallback'); if (fb) fb.onclick = () => openWith(e.path);
+  }
+}
+
 async function openPreview(e) {
   if (!await guardDirty()) return;
-  mona.disposeIfAny(); crepe.disposeIfAny(); imgEditState = null; // 离开编辑态时回收编辑器（连带 worker），避免泄漏
+  mona.disposeIfAny(); crepe.disposeIfAny(); docxKit.dispose(); imgEditState = null; // 离开编辑态时回收编辑器（连带 worker），避免泄漏
   showPreviewPanel();
   $('#preview-title').textContent = e.name;
   const body = $('#preview-body');
   body.innerHTML = '<div class="cmdk-loading">加载中…</div>';
   renderPreviewActions(e);
   renderPreviewFoot(e);
+  // Office 文件：Word 原格式编辑，Excel 表格预览（按扩展名拦截——.docx 本质是 zip，不能落进压缩包分支）
+  if (OFFICE_DOCX.test(e.name)) return openDocxPreview(e);
+  if (OFFICE_XLSX.test(e.name)) return openXlsxPreview(e);
   const k = e.kind;
   if (k === 'image') {
     // 预览用中等缩略图（秒开）。heic/heif/tiff 浏览器无法直接渲染原图，统一走 sips 缩略图端点
@@ -1601,8 +1705,8 @@ async function openRecent(p) {
   if (!e) { toast('文件不在原位置了（可能被移动或删除）', true); return; }
   if (e.isDir) { navigate(p); return; }
   recordRecent(p);
-  // 翻箱预览不了的格式（docx/压缩包等二进制）→ 系统默认应用；其余原地预览
-  if (e.kind === 'other') { openWith(p); return; }
+  // 翻箱预览不了的二进制 → 系统默认应用；Word/Excel 现在能应用内打开了
+  if (e.kind === 'other' && !isOfficeName(e.name)) { openWith(p); return; }
   state.selected = p;
   openPreview(e);
   renderFiles();
