@@ -83,10 +83,45 @@ app.whenReady().then(() => {
   app.setName('翻箱 FanBox');
   buildMenu();
   createWindow();
+  startShotWatch();
   // 启动 6 秒后查一次新版本（不挡启动），长开会话每 12 小时再查
   setTimeout(checkUpdate, 6000);
   setInterval(checkUpdate, 12 * 3600 * 1000);
 });
+
+// ---------- 截图直通车：监听系统截屏落盘，新截图推给渲染层浮出直通卡 ----------
+function screenshotDir() {
+  try {
+    const out = require('child_process').execSync('defaults read com.apple.screencapture location 2>/dev/null', { encoding: 'utf8' }).trim();
+    if (out) return out.startsWith('~') ? path.join(os.homedir(), out.slice(1)) : out;
+  } catch { /* 未自定义 → 默认桌面 */ }
+  return path.join(os.homedir(), 'Desktop');
+}
+let shotWatcher = null;
+const shotSent = new Map(); // path -> t，fs.watch 同一文件会连发多个事件，3s 内去重
+function startShotWatch() {
+  if (process.platform !== 'darwin' || shotWatcher) return;
+  const dir = screenshotDir();
+  if (!fs.existsSync(dir)) return;
+  try {
+    shotWatcher = fs.watch(dir, { persistent: false }, (evt, filename) => {
+      const name = filename ? filename.toString() : '';
+      // 截屏写盘有「.截屏xxx.png」点前缀的中间态，跳过；只认系统截屏的命名习惯
+      if (!/^(截屏|截圖|截图|Screenshot|Screen Shot|CleanShot|SCR-)/i.test(name) || !/\.(png|jpe?g)$/i.test(name)) return;
+      const fp = path.join(dir, name);
+      setTimeout(() => { // 等写盘完成再确认
+        fs.stat(fp, (err, st) => {
+          if (err || !st.isFile() || st.size < 1000) return;
+          const last = shotSent.get(fp) || 0;
+          if (Date.now() - last < 3000) return;
+          shotSent.set(fp, Date.now());
+          if (shotSent.size > 50) { const k = shotSent.keys().next().value; shotSent.delete(k); }
+          if (win && !win.isDestroyed()) win.webContents.send('shot:new', { path: fp, name, size: st.size });
+        });
+      }, 600);
+    });
+  } catch { /* 无权限等，静默放弃 */ }
+}
 
 // ---------- 更新检测：查 GitHub Releases，有新版本通知渲染层引导下载 ----------
 // 现阶段只做「检测 + 引导」：Apple Development 签名过不了 Squirrel.Mac 的校验，

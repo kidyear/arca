@@ -343,11 +343,26 @@ function visibleEntries() {
   else list.sort((a, b) => dirFirst(a, b) || a.name.localeCompare(b.name, 'zh', { numeric: true }));
   return list;
 }
+// 底部状态条：当前文件夹的基础信息小字常驻，「占用透视」入口也安在这
+function renderStatusbar() {
+  const sb = $('#statusbar'); if (!sb) return;
+  if (state.skillsMode || state.recentMode || !state.cwd) { sb.classList.add('hidden'); return; }
+  const list = state.visible || [];
+  const dirs = list.filter((e) => e.isDir).length;
+  const files = list.length - dirs;
+  const bytes = list.reduce((a, e) => a + (e.isDir ? 0 : e.size || 0), 0);
+  sb.classList.remove('hidden');
+  sb.innerHTML = `<span>${list.length} 项${dirs ? ` · ${dirs} 文件夹` : ''}${files ? ` · ${files} 文件 ${fmtSize(bytes)}` : ''}</span><span class="sb-links">${state.project ? '<a id="sb-rel" title="版本号→CHANGELOG→打包→push→Release 一条龙，在终端跑">发版</a>' : ''}<a id="sb-mem" title="这个文件夹里 AI 干过什么：历史会话、改过的文件、一键续上">项目记忆</a><a id="sb-du" title="算上子目录的真实磁盘占用">占用透视</a></span>`;
+  $('#sb-du').onclick = () => diskPanel(state.cwd);
+  $('#sb-mem').onclick = () => memoryPanel(state.cwd);
+  const rel = $('#sb-rel'); if (rel) rel.onclick = () => releasePanel();
+}
 function renderFiles() {
   if (state.skillsMode) return; // skills 视图自管 #file-area，文件渲染不要清掉它
   const area = $('#file-area');
   const list = visibleEntries();
   state.visible = list;
+  renderStatusbar();
   if (!list.length) {
     const emptyMsg = state.recentMode ? '没找到最近修改的文件' : '这个文件夹是空的';
     const emptyIc = state.recentMode ? 'clock' : 'inbox';
@@ -535,6 +550,15 @@ async function openPreview(e) {
   } else if (k === 'text') {
     if (isMdName(e.name)) return enterEditMode(e); // md 预览即编辑：打开就是所见即所得，自动保存
     renderTextPreview(await api('/api/read?path=' + encodeURIComponent(e.path)));
+  } else if (k === 'archive') {
+    const d = await api('/api/archive?path=' + encodeURIComponent(e.path));
+    if (!d.ok) {
+      body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>${escapeHtml(d.error || '无法读取')}<br><br>${fmtSize(e.size)}</div>`;
+    } else {
+      const rows = d.entries.map((en) =>
+        `<div class="arch-row${en.name.endsWith('/') ? ' is-dir' : ''}"><span class="arch-name">${escapeHtml(en.name)}</span><span class="arch-size">${en.size != null ? fmtSize(en.size) : ''}</span></div>`).join('');
+      body.innerHTML = `<div class="preview-meta"><span>${fmtSize(e.size)}</span><span>${d.entries.length}${d.truncated ? '+' : ''} 项</span></div><div class="arch-list">${rows}</div>`;
+    }
   } else {
     body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>这个文件类型无法预览<br><br>${fmtSize(e.size)}</div>`;
   }
@@ -1272,6 +1296,179 @@ function confirmDialog(msg) {
     ov.querySelector('[data-act=yes]').focus();
   });
 }
+// ---------- 截图直通车：系统截屏落盘 → 右下角浮出直通卡，终端/素材/标注一步到位 ----------
+const shotTray = {
+  el: null, timer: null,
+  init() {
+    if (!window.fanboxShot) return; // 浏览器版没有截屏监听
+    window.fanboxShot.onNew((m) => this.show(m));
+  },
+  show(m) {
+    this.dismiss();
+    const el = document.createElement('div');
+    el.className = 'shot-card';
+    el.innerHTML = `
+      <img class="shot-thumb" draggable="true" src="/api/thumb?path=${encodeURIComponent(m.path)}&w=480&v=${m.size}" title="新截图 · 可拖进终端">
+      <div class="shot-info"><div class="shot-name">${escapeHtml(m.name)}</div>
+      <div class="shot-acts">
+        <button data-act="term" title="把路径喂给终端里的 agent">→ 终端</button>
+        <button data-act="save" title="移动到当前文件夹的 素材/ 子目录">收进素材</button>
+        <button data-act="edit" title="圈重点再发">标注</button>
+        <button data-act="close" title="不理它也会自己走">✕</button>
+      </div></div>`;
+    document.body.appendChild(el);
+    this.el = el;
+    const img = el.querySelector('.shot-thumb');
+    img.ondragstart = (ev) => ev.dataTransfer.setData('text/plain', m.path);
+    img.onclick = () => lightbox(m.path);
+    el.querySelector('[data-act=term]').onclick = () => { term.insertPath(m.path); this.dismiss(); };
+    el.querySelector('[data-act=save]').onclick = async () => {
+      const r = await apiPost('/api/move', { src: m.path, dstDir: state.cwd + '/素材' });
+      if (r.ok) toast('已收进 素材/'); else toast(r.error || '移动失败', true);
+      this.dismiss();
+    };
+    el.querySelector('[data-act=edit]').onclick = () => {
+      this.dismiss();
+      enterImageEdit({ path: m.path, name: m.name, kind: 'image', size: m.size, mtime: Date.now() });
+    };
+    el.querySelector('[data-act=close]').onclick = () => this.dismiss();
+    this.timer = setTimeout(() => this.dismiss(), 45000);
+  },
+  dismiss() { clearTimeout(this.timer); if (this.el) { this.el.remove(); this.el = null; } },
+};
+
+// 项目记忆：这个文件夹里 AI 干过什么——历史会话考古，可展开改过的文件，可一键续上
+async function memoryPanel(dirPath) {
+  const old = $('.mem-overlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.className = 'input-overlay mem-overlay';
+  ov.innerHTML = `<div class="input-dialog mem-dialog">
+    <div class="input-title">项目记忆 · ${escapeHtml(dirPath.replace(state.home, '~'))}</div>
+    <div class="mem-body"><div class="cmdk-loading">翻会话日志中…</div></div></div>`;
+  document.body.appendChild(ov);
+  const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); close(); } };
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey, true); };
+  ov.onclick = (ev) => { if (ev.target === ov) close(); };
+  document.addEventListener('keydown', onKey, true);
+  const d = await api('/api/project-memory?path=' + encodeURIComponent(dirPath));
+  const body = ov.querySelector('.mem-body');
+  if (!d.ok || !d.sessions.length) {
+    body.innerHTML = '<div class="empty-state">这个文件夹还没有 agent 会话记录<br><br><span class="usage-sub">在这里跑过 Claude Code / Codex 之后，历史会话会出现在这里</span></div>';
+    return;
+  }
+  body.innerHTML = d.sessions.map((s, i) => `
+    <div class="mem-sess">
+      <div class="mem-head" data-i="${i}">
+        <span class="mem-agent${s.agent === 'codex' ? ' codex' : ''}">${s.agent === 'codex' ? '>_' : 'C'}</span>
+        <span class="mem-title">${escapeHtml(s.title || '（无标题会话）')}</span>
+        <button class="ghost-btn mem-resume" data-i="${i}" title="在内嵌终端里接上这段会话的上下文继续">▶ 续上</button>
+      </div>
+      <div class="mem-meta">${fmtTime(s.lastT)} · ${s.userMsgs} 条消息${s.files.length ? ` · 改了 ${s.files.length} 个文件` : ''}${s.skills.length ? ' · ' + s.skills.map((k) => `<i class="mem-skill">${escapeHtml(k)}</i>`).join(' ') : ''}</div>
+      ${s.files.length ? `<div class="mem-files hidden">${s.files.map((f) => `<div class="mem-file" data-p="${escapeHtml(f)}" title="${escapeHtml(f)}">${escapeHtml(f.startsWith(dirPath + '/') ? f.slice(dirPath.length + 1) : f.replace(state.home, '~'))}</div>`).join('')}</div>` : ''}
+    </div>`).join('');
+  body.querySelectorAll('.mem-head').forEach((h) => {
+    h.onclick = (ev) => {
+      if (ev.target.closest('.mem-resume')) return;
+      const files = h.parentElement.querySelector('.mem-files');
+      if (files) files.classList.toggle('hidden');
+    };
+  });
+  body.querySelectorAll('.mem-resume').forEach((b) => {
+    b.onclick = () => {
+      const s = d.sessions[Number(b.dataset.i)];
+      const cmd = s.agent === 'codex' ? `codex resume ${s.id}` : `claude --dangerously-skip-permissions --resume ${s.id}`;
+      close();
+      term.runInDir(dirPath, cmd, '已在终端续上会话');
+    };
+  });
+  body.querySelectorAll('.mem-file').forEach((f) => {
+    f.onclick = async () => {
+      const p = f.dataset.p;
+      close();
+      await navigate(dirOf(p));
+      const e = state.entries.find((x) => x.path === p);
+      if (e) { state.selected = p; openPreview(e); renderFiles(); }
+    };
+  });
+}
+
+// 发版向导：版本号 + 发布说明（预填 CHANGELOG 的 Unreleased 段）→ 命令序列在内嵌终端跑，每步可见可拦
+async function releasePanel() {
+  const dirPath = state.cwd;
+  const old = $('.rel-overlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.className = 'input-overlay rel-overlay';
+  ov.innerHTML = `<div class="input-dialog rel-dialog"><div class="input-title">发版</div><div class="rel-body"><div class="cmdk-loading">检查项目状态…</div></div></div>`;
+  document.body.appendChild(ov);
+  const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); close(); } };
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey, true); };
+  ov.onclick = (ev) => { if (ev.target === ov) close(); };
+  document.addEventListener('keydown', onKey, true);
+  const d = await api('/api/release/inspect?path=' + encodeURIComponent(dirPath));
+  const body = ov.querySelector('.rel-body');
+  if (!d.ok) { body.innerHTML = `<div class="empty-state">${escapeHtml(d.error)}</div>`; return; }
+  const bump = d.version.replace(/(\d+)(\D*)$/, (m, n, t) => (Number(n) + 1) + t);
+  body.innerHTML = `
+    <div class="rel-row"><label>版本号</label><span class="rel-cur">当前 v${escapeHtml(d.version)} →</span><input id="rel-ver" value="${escapeHtml(bump)}" spellcheck="false"></div>
+    <div class="rel-row rel-col"><label>发布说明${d.unreleased ? '（预填自 CHANGELOG 的 Unreleased 段）' : ''}</label><textarea id="rel-notes" rows="8" spellcheck="false">${escapeHtml(d.unreleased)}</textarea></div>
+    <div class="rel-opts">
+      ${d.hasDist ? '<label><input type="checkbox" id="rel-dist" checked> 打包（npm run dist）</label>' : ''}
+      ${d.remote ? '<label><input type="checkbox" id="rel-push" checked> 推送（git push）</label>' : ''}
+      ${d.gh && d.remote ? '<label><input type="checkbox" id="rel-gh" checked> GitHub Release' + (d.hasDist ? '（附 dmg）' : '') + '</label>' : ''}
+    </div>
+    ${d.dirty ? '<div class="rel-hint">工作区有未提交改动，会一并进这次发版 commit</div>' : ''}
+    ${!d.isRepo ? '<div class="rel-hint">这里不是 git 仓库，只能改版本号</div>' : ''}
+    <div class="input-actions"><button class="ghost-btn" id="rel-cancel">取消</button><button class="primary" id="rel-go">在终端开跑</button></div>`;
+  $('#rel-cancel').onclick = close;
+  $('#rel-go').onclick = async () => {
+    const version = $('#rel-ver').value.trim();
+    if (!/^\d+\.\d+\.\d+/.test(version)) { toast('版本号要 x.y.z 格式', true); return; }
+    $('#rel-go').disabled = true;
+    const r = await apiPost('/api/release/prepare', {
+      path: dirPath, version,
+      notes: $('#rel-notes').value,
+      doDist: !!($('#rel-dist') && $('#rel-dist').checked),
+      doPush: !!($('#rel-push') && $('#rel-push').checked),
+      doRelease: !!($('#rel-gh') && $('#rel-gh').checked),
+    });
+    if (!r.ok) { toast(r.error || '准备失败', true); $('#rel-go').disabled = false; return; }
+    close();
+    term.runInDir(dirPath, r.cmd, `v${version} 发版序列已在终端开跑`);
+  };
+}
+
+// 磁盘占用透视：du 口径的真实占用条形榜，目录行可下钻
+async function diskPanel(dirPath) {
+  const old = $('.disk-overlay'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.className = 'input-overlay disk-overlay';
+  ov.innerHTML = `<div class="input-dialog disk-dialog">
+    <div class="input-title disk-title"></div>
+    <div class="disk-body"><div class="cmdk-loading">计算中…（大目录会慢几秒）</div></div></div>`;
+  document.body.appendChild(ov);
+  const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); close(); } };
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey, true); };
+  ov.onclick = (ev) => { if (ev.target === ov) close(); };
+  document.addEventListener('keydown', onKey, true);
+  const load = async (p) => {
+    ov.querySelector('.disk-title').textContent = '磁盘占用 · ' + p.replace(state.home, '~');
+    const body = ov.querySelector('.disk-body');
+    body.innerHTML = '<div class="cmdk-loading">计算中…（大目录会慢几秒）</div>';
+    const d = await api('/api/du?path=' + encodeURIComponent(p));
+    if (!d.ok) { body.innerHTML = `<div class="empty-state">${escapeHtml(d.error || '读取失败')}</div>`; return; }
+    const max = d.items.length ? d.items[0].size : 1;
+    const up = p !== '/' ? `<div class="disk-row disk-up" data-dir="${escapeHtml(dirOf(p))}"><span class="disk-name">↑ 上一级</span></div>` : '';
+    body.innerHTML = `<div class="disk-total">共 ${fmtSize(d.total)}${d.more ? ` · 只显示前 ${d.items.length} 项` : ''}</div>` + up +
+      d.items.map((it) => `<div class="disk-row${it.isDir ? ' is-dir' : ''}" data-dir="${it.isDir ? escapeHtml(p + '/' + it.name) : ''}">
+        <i class="disk-bar" style="width:${Math.max(1, Math.round(it.size / max * 100))}%"></i>
+        <span class="disk-name">${it.isDir ? '📁 ' : ''}${escapeHtml(it.name)}</span><span class="disk-size">${fmtSize(it.size)}</span></div>`).join('');
+    body.querySelectorAll('.disk-row[data-dir]').forEach((r) => {
+      if (r.dataset.dir) r.onclick = () => load(r.dataset.dir);
+    });
+  };
+  load(dirPath);
+}
+
 // 右键上下文菜单
 function closeContextMenu() { const m = $('#context-menu'); if (m) m.remove(); }
 function showContextMenu(ev, e) {
@@ -1280,6 +1477,7 @@ function showContextMenu(ev, e) {
   const items = [];
   if (e.isDir) items.push({ label: '打开', fn: () => navigate(e.path) });
   else items.push({ label: '预览', fn: () => { state.selected = e.path; openPreview(e); renderFiles(); } });
+  if (e.isDir) items.push({ label: '磁盘占用透视', fn: () => diskPanel(e.path) });
   if (e.isDir) items.push({ label: '在终端打开', fn: () => term.openInDir(e.path) });
   else items.push({ label: '在所在目录开终端', fn: () => term.openInDir(dirOf(e.path)) });
   if (e.kind === 'text') items.push({ label: '编辑文本', fn: () => enterEditMode(e) });
@@ -1714,6 +1912,7 @@ function bindEvents() {
   $('#term-claude').onclick = () => term.launchAgent('claude --dangerously-skip-permissions');
   $('#term-codex').onclick = () => term.launchAgent('codex');
   usagePanel.bind();
+  shotTray.init();
   $('#skills-entry').onclick = () => skillsView.show();
   $('#term-newtab').onclick = () => term.newTab();
   $('#term-max').onclick = () => term.toggleMax();
@@ -1771,6 +1970,8 @@ function bindEvents() {
     popupMenu(e, [
       { label: '新建文件夹…', fn: () => doCreate('dir') },
       { label: '新建文件…', fn: () => doCreate('file') },
+      { sep: true },
+      { label: '磁盘占用透视', fn: () => diskPanel(state.cwd) },
     ]);
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#context-menu')) closeContextMenu(); });
@@ -1964,6 +2165,13 @@ const term = {
     }
     if (!sess) sess = await this.openInDir(state.cwd); // 等 spawn 完，拿确切 session 写入
     if (sess && !sess.dead) { this.input(sess.id, cmd + '\r'); sess.xterm.focus(); toast('已在终端启动 ' + cmd); }
+    else toast('终端启动失败', true);
+  },
+  // 在指定目录新开标签跑命令（续会话/发版等）：不复用别处的空闲 shell，目录必须对
+  async runInDir(dir, cmd, msg) {
+    if (!this.available()) { openWith(dir, 'terminal'); return; }
+    const sess = await this.openInDir(dir);
+    if (sess && !sess.dead) { this.input(sess.id, cmd + '\r'); sess.xterm.focus(); toast(msg || '已在终端启动'); }
     else toast('终端启动失败', true);
   },
   // 该会话前台是不是裸 shell？判断不了一律按「不是」处理——宁可新开标签，也不往运行中的程序里打字

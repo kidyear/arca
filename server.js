@@ -43,6 +43,7 @@ const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'i
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv']);
 const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac']);
 const PDF_EXT = new Set(['pdf']);
+const ARCHIVE_EXT = new Set(['zip', 'jar', 'tar', 'tgz', 'gz', 'bz2', 'xz', '7z', 'rar']);
 
 const MIME = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8',
@@ -82,6 +83,7 @@ function kindOf(name, isDir) {
   if (VIDEO_EXT.has(e)) return 'video';
   if (AUDIO_EXT.has(e)) return 'audio';
   if (PDF_EXT.has(e)) return 'pdf';
+  if (ARCHIVE_EXT.has(e)) return 'archive';
   if (TEXT_EXT.has(e) || /^(dockerfile|makefile|readme|license|\.[a-z]+rc)$/i.test(name)) return 'text';
   return 'other';
 }
@@ -482,6 +484,285 @@ async function renamePath(p, newName) {
   return { ok: true, path: dst };
 }
 
+// ---------- 发版向导：检查项目状态 → 改版本号/CHANGELOG → 命令序列交给内嵌终端跑（每步可见可拦）----------
+async function releaseInspect(p) {
+  const dir = resolvePath(p);
+  const sh = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { cwd: dir, timeout: 8000 }, (err, stdout) => resolve(err ? null : String(stdout).trim())));
+  let pkg;
+  try { pkg = JSON.parse(await fsp.readFile(path.join(dir, 'package.json'), 'utf8')); }
+  catch { return { ok: false, error: '这里没有 package.json——发版向导目前只认 node 项目' }; }
+  const out = { ok: true, dir, name: pkg.name || path.basename(dir), version: pkg.version || '0.0.0' };
+  out.hasDist = !!(pkg.scripts && pkg.scripts.dist);
+  out.remote = await sh('git', ['remote', 'get-url', 'origin']);
+  out.branch = await sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const status = await sh('git', ['status', '--porcelain']);
+  out.isRepo = status !== null;
+  out.dirty = !!(status && status.length);
+  out.gh = !!(await sh('/bin/sh', ['-lc', 'command -v gh']));
+  out.unreleased = ''; out.hasChangelog = false;
+  try {
+    const cl = await fsp.readFile(path.join(dir, 'CHANGELOG.md'), 'utf8');
+    out.hasChangelog = true;
+    const m = cl.match(/## \[Unreleased\]\s*([\s\S]*?)(?=\n## \[|$)/);
+    if (m) out.unreleased = m[1].trim();
+  } catch { /* 没有 CHANGELOG 不挡发版 */ }
+  return out;
+}
+
+async function releasePrepare(b) {
+  const dir = resolvePath(b.path);
+  const version = String(b.version || '').trim();
+  if (!/^\d+\.\d+\.\d+/.test(version)) return { ok: false, error: '版本号格式不对（要 x.y.z）' };
+  const notes = String(b.notes || '').trim();
+  // 1) package.json 版本号
+  const pkgFile = path.join(dir, 'package.json');
+  let pkgRaw;
+  try { pkgRaw = await fsp.readFile(pkgFile, 'utf8'); } catch { return { ok: false, error: '读不到 package.json' }; }
+  if (!/"version"\s*:\s*"[^"]*"/.test(pkgRaw)) return { ok: false, error: 'package.json 里没有 version 字段' };
+  await fsp.writeFile(pkgFile, pkgRaw.replace(/"version"\s*:\s*"[^"]*"/, `"version": "${version}"`), 'utf8');
+  // 2) CHANGELOG：Unreleased 段落升格为新版本，开新的空 Unreleased
+  const clFile = path.join(dir, 'CHANGELOG.md');
+  try {
+    const cl = await fsp.readFile(clFile, 'utf8');
+    if (cl.includes('## [Unreleased]')) {
+      const date = new Date().toISOString().slice(0, 10);
+      const next = cl.replace(/## \[Unreleased\][\s\S]*?(?=\n## \[|$)/, `## [Unreleased]\n\n## [${version}] - ${date}\n\n${notes}\n\n`);
+      await fsp.writeFile(clFile, next, 'utf8');
+    }
+  } catch { /* 没有 CHANGELOG 跳过 */ }
+  // 3) 发布说明落临时文件给 gh 用；命令序列拼好交还前端注入终端
+  const notesFile = path.join(os.tmpdir(), `fanbox-release-notes-${Date.now()}.md`);
+  await fsp.writeFile(notesFile, notes || `v${version}`, 'utf8');
+  // 标题优先取第一个要点的内容，「### Added」这类小节头当不了标题
+  const lines = notes.split('\n').map((l) => l.trim()).filter(Boolean);
+  const firstBullet = lines.find((l) => /^[-*]\s/.test(l));
+  const firstPlain = lines.find((l) => !/^#/.test(l));
+  const title = (firstBullet || firstPlain || '').replace(/^[#\-*\s]+/, '').slice(0, 60);
+  const steps = [];
+  if (b.doDist) steps.push('npm run dist');
+  steps.push('git add -A', `git commit -m ${shellQuote(`v${version}: ${title || '发版'}`)}`);
+  if (b.doPush) steps.push('git push');
+  if (b.doRelease) steps.push(`gh release create v${version} --title ${shellQuote(`v${version}${title ? ' · ' + title : ''}`)} --notes-file ${shellQuote(notesFile)}${b.doDist ? ` dist/*${version}*.dmg` : ''}`);
+  return { ok: true, cmd: steps.join(' && ') };
+}
+
+// ---------- 项目记忆：这个文件夹里 AI 干过什么 ----------
+// 数据源：~/.claude/projects/<munge(cwd)>/*.jsonl + ~/.codex/sessions/**/rollout-*.jsonl（头部 cwd 匹配）。
+// 单会话解析结果按 (size, mtime) 缓存，再次打开只重解析有变化的文件。
+const projMemCache = new Map(); // file -> { size, mtimeMs, sess }
+const mungeClaudeDir = (cwd) => cwd.replace(/[^A-Za-z0-9]/g, '-');
+
+async function parseClaudeSession(fp, st) {
+  const hit = projMemCache.get(fp);
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.sess;
+  const sess = { id: path.basename(fp, '.jsonl'), agent: 'claude', title: '', firstT: 0, lastT: st.mtimeMs, userMsgs: 0, files: [], skills: [] };
+  const filesSet = new Set(), skillsSet = new Set();
+  // 流式逐行，廉价字符串预判后才 JSON.parse——大会话文件也不整读进内存
+  const stream = fs.createReadStream(fp, { encoding: 'utf8' });
+  let rest = '';
+  const handleLine = (line) => {
+    if (!sess.firstT) {
+      const m = line.match(/"timestamp":"([^"]+)"/);
+      if (m) sess.firstT = Date.parse(m[1]) || 0;
+    }
+    if (line.includes('"type":"user"') && !line.includes('"isMeta":true') && !line.includes('"tool_use_id"')) {
+      sess.userMsgs++;
+      if (!sess.title) {
+        try {
+          const d = JSON.parse(line);
+          const c = d.message && d.message.content;
+          let text = typeof c === 'string' ? c : (Array.isArray(c) ? (c.find((x) => x.type === 'text') || {}).text || '' : '');
+          text = text.trim();
+          if (text && !text.startsWith('<') && !text.startsWith('Caveat:')) sess.title = text.slice(0, 160);
+        } catch { /* */ }
+      }
+    }
+    if (line.includes('"file_path"') && /"name":"(Write|Edit|MultiEdit|NotebookEdit)"/.test(line)) {
+      try {
+        const d = JSON.parse(line);
+        const content = d.message && Array.isArray(d.message.content) ? d.message.content : [];
+        for (const it of content) {
+          if (it.type === 'tool_use' && it.input && it.input.file_path) filesSet.add(it.input.file_path);
+        }
+      } catch { /* */ }
+    }
+    if (line.includes('"name":"Skill"')) {
+      try {
+        const d = JSON.parse(line);
+        const content = d.message && Array.isArray(d.message.content) ? d.message.content : [];
+        for (const it of content) {
+          if (it.type === 'tool_use' && it.name === 'Skill' && it.input && it.input.skill) skillsSet.add(String(it.input.skill).replace(/^.*:/, ''));
+        }
+      } catch { /* */ }
+    } else if (line.includes('<command-name>')) {
+      const m = line.match(/<command-name>\s*\/?([\w.:-]+)\s*<\/command-name>/);
+      if (m) skillsSet.add(m[1].replace(/^.*:/, ''));
+    }
+  };
+  for await (const chunk of stream) {
+    rest += chunk;
+    let idx;
+    while ((idx = rest.indexOf('\n')) !== -1) { handleLine(rest.slice(0, idx)); rest = rest.slice(idx + 1); }
+  }
+  if (rest.trim()) handleLine(rest);
+  sess.files = [...filesSet].slice(0, 80);
+  sess.skills = [...skillsSet].slice(0, 20);
+  projMemCache.set(fp, { size: st.size, mtimeMs: st.mtimeMs, sess });
+  return sess;
+}
+
+async function parseCodexSession(fp, st) {
+  const hit = projMemCache.get(fp);
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.sess;
+  const sess = { id: '', agent: 'codex', title: '', firstT: st.birthtimeMs || 0, lastT: st.mtimeMs, userMsgs: 0, files: [], skills: [] };
+  try {
+    const txt = await fsp.readFile(fp, 'utf8');
+    for (const line of txt.split('\n')) {
+      if (!sess.id && line.includes('session_meta')) {
+        const m = line.match(/"id":"([0-9a-f-]{8,})"/);
+        if (m) sess.id = m[1];
+      }
+      if (line.includes('"role":"user"') && line.includes('input_text')) {
+        try {
+          const d = JSON.parse(line);
+          const payload = d.payload || d;
+          const item = payload.type === 'message' ? payload : null;
+          if (item) {
+            const text = (item.content || []).filter((x) => x.type === 'input_text').map((x) => x.text).join(' ').trim();
+            // 环境上下文/IDE 注入的供述跳过，只要人打的字
+            if (text && !text.startsWith('<')) { sess.userMsgs++; if (!sess.title) sess.title = text.slice(0, 160); }
+          }
+        } catch { /* */ }
+      }
+    }
+  } catch { /* */ }
+  if (!sess.id) sess.id = path.basename(fp, '.jsonl').replace(/^rollout-[\d-]*T[\d-]*-/, '');
+  projMemCache.set(fp, { size: st.size, mtimeMs: st.mtimeMs, sess });
+  return sess;
+}
+
+async function projectMemory(p) {
+  const cwd = resolvePath(p);
+  const sessions = [];
+  // Claude Code：项目目录名就是 munge 过的 cwd，正向算一遍直达
+  try {
+    const base = path.join(CLAUDE_PROJ, mungeClaudeDir(cwd));
+    const names = (await fsp.readdir(base)).filter((n) => n.endsWith('.jsonl'));
+    const stats = (await Promise.all(names.map(async (n) => {
+      const fp = path.join(base, n);
+      try { return { fp, st: await fsp.stat(fp) }; } catch { return null; }
+    }))).filter(Boolean).sort((a, b) => b.st.mtimeMs - a.st.mtimeMs).slice(0, 40);
+    for (const { fp, st } of stats) sessions.push(await parseClaudeSession(fp, st));
+  } catch { /* 这个目录没有 Claude Code 会话 */ }
+  // Codex：近期 rollout 文件按头部 cwd 匹配（数量封顶控 IO）
+  try {
+    const files = [];
+    const walk = async (dir, depth) => {
+      let names;
+      try { names = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+      for (const n of names) {
+        const fp = path.join(dir, n.name);
+        if (n.isDirectory() && depth < 3) await walk(fp, depth + 1);
+        else if (n.isFile() && n.name.endsWith('.jsonl')) {
+          try { files.push({ fp, st: await fsp.stat(fp) }); } catch { /* */ }
+        }
+      }
+    };
+    await walk(CODEX_SESS, 0);
+    files.sort((a, b) => b.st.mtimeMs - a.st.mtimeMs);
+    for (const { fp, st } of files.slice(0, 60)) {
+      try { if ((await readCwdFromHead(fp, 16384)) === cwd) sessions.push(await parseCodexSession(fp, st)); } catch { /* */ }
+    }
+  } catch { /* 没用过 Codex */ }
+  // 没有正经标题的会话（纯 warmup / 空会话）沉底，按最近活跃排
+  sessions.sort((a, b) => (b.title ? 1 : 0) - (a.title ? 1 : 0) || b.lastT - a.lastT);
+  sessions.sort((a, b) => b.lastT - a.lastT);
+  return { ok: true, cwd, sessions: sessions.filter((s) => s.title || s.files.length).slice(0, 40) };
+}
+
+// ---------- 磁盘占用透视：算清当前目录每个子项的真实占用 ----------
+// 文件直接 stat（快）；目录一次 du -sk 批量算。du 碰到无权限子目录会报错但仍输出能算的部分，所以忽略 err 只用 stdout
+async function diskUsage(p) {
+  const dir = resolvePath(p);
+  let names;
+  try { names = await fsp.readdir(dir, { withFileTypes: true }); } catch (e) { return { ok: false, error: '读取失败：' + e.message }; }
+  const dirs = [], items = [];
+  await Promise.all(names.map(async (d) => {
+    const full = path.join(dir, d.name);
+    if (d.isDirectory() && !d.isSymbolicLink()) { dirs.push(full); return; }
+    try { const st = await fsp.lstat(full); if (st.isFile()) items.push({ name: d.name, size: st.size, isDir: false }); } catch { /* */ }
+  }));
+  if (dirs.length) {
+    const out = await new Promise((resolve) => {
+      execFile('du', ['-sk', ...dirs], { timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => resolve(stdout || ''));
+    });
+    for (const line of out.split('\n')) {
+      const m = line.match(/^(\d+)\s+(.+)$/);
+      if (m) items.push({ name: path.basename(m[2]), size: Number(m[1]) * 1024, isDir: true });
+    }
+  }
+  items.sort((a, b) => b.size - a.size);
+  const total = items.reduce((a, b) => a + b.size, 0);
+  return { ok: true, dir, total, items: items.slice(0, 60), more: Math.max(0, items.length - 60) };
+}
+
+// 压缩包内容清单：全用系统自带工具（unzip / bsdtar / gzip），保持零依赖
+async function archiveList(p) {
+  const file = resolvePath(p);
+  try { await fsp.stat(file); } catch { return { ok: false, error: '文件不存在' }; }
+  const name = path.basename(file).toLowerCase();
+  const run = (cmd, args) => new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout: 15000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+  });
+  const MAX = 800;
+  const entries = [];
+  try {
+    if (/\.(zip|jar)$/.test(name)) {
+      const out = await run('unzip', ['-l', '--', file]);
+      for (const line of out.split('\n')) {
+        const m = line.match(/^\s*(\d+)\s+\S+\s+\S+\s+(.+)$/);
+        if (m) entries.push({ name: m[2], size: Number(m[1]) });
+        if (entries.length > MAX) break;
+      }
+    } else if (/\.(tar|tgz|tbz2?|txz)$/.test(name) || /\.tar\.(gz|bz2|xz|zst)$/.test(name)) {
+      const out = await run('tar', ['-tf', file]); // bsdtar 自动识别压缩格式
+      for (const line of out.split('\n')) {
+        if (line.trim()) entries.push({ name: line });
+        if (entries.length > MAX) break;
+      }
+    } else if (/\.gz$/.test(name)) {
+      const out = await run('gzip', ['-l', file]);
+      const m = out.split('\n')[1] && out.split('\n')[1].match(/^\s*\d+\s+(\d+)/);
+      entries.push({ name: path.basename(file, '.gz'), size: m ? Number(m[1]) : undefined });
+    } else {
+      return { ok: false, error: '7z / rar 没有系统自带的解析工具，可在系统解压软件中打开' };
+    }
+  } catch (e) {
+    return { ok: false, error: '读取失败：' + (e.message || '').split('\n')[0] };
+  }
+  const truncated = entries.length > MAX;
+  return { ok: true, entries: entries.slice(0, MAX), truncated };
+}
+
+// 移动文件到目标目录（截图直通车「收进素材」等用）：同卷 rename，跨卷回退拷贝；同名自动加序号防覆盖
+async function movePath(src, dstDir) {
+  const s = resolvePath(src), d = resolvePath(dstDir);
+  if (!fs.existsSync(s)) return { ok: false, error: '源文件不存在' };
+  await fsp.mkdir(d, { recursive: true });
+  let dst = path.join(d, path.basename(s));
+  if (fs.existsSync(dst)) {
+    const ex = path.extname(dst), base = path.basename(dst, ex);
+    let i = 2;
+    while (fs.existsSync(dst)) dst = path.join(d, `${base}-${i++}${ex}`);
+  }
+  try { await fsp.rename(s, dst); }
+  catch (e) {
+    if (e.code === 'EXDEV') { await fsp.copyFile(s, dst); await fsp.unlink(s); }
+    else return { ok: false, error: e.message };
+  }
+  return { ok: true, path: dst };
+}
+
 async function createEntry(parentPath, name, type) {
   const parent = resolvePath(parentPath);
   name = (name || '').trim();
@@ -697,6 +978,7 @@ async function serveStatic(req, res, urlPath) {
 
 // ---------- 缩略图（性能关键：不再把原图/原视频整文件当缩略图）----------
 const THUMB_IMG_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'avif']);
+const ALPHA_IMG_EXT = new Set(['png', 'gif', 'webp', 'avif']); // 可能带透明通道：缩略图必须出 png，jpeg 会把透明拍成白底
 const thumbInflight = new Map(); // cacheFile -> Promise，去重并发生成
 function run(cmd, args, opts) {
   return new Promise((resolve, reject) => execFile(cmd, args, { timeout: 15000, ...opts }, (e) => (e ? reject(e) : resolve())));
@@ -742,7 +1024,8 @@ async function generateThumb(src, e, size, cacheFile, isImg) {
     return;
   }
   if (isImg) {
-    await run('sips', ['-s', 'format', 'jpeg', '-Z', String(size), src, '--out', cacheFile]);
+    const fmt = cacheFile.endsWith('.png') ? 'png' : 'jpeg';
+    await run('sips', ['-s', 'format', fmt, '-Z', String(size), src, '--out', cacheFile]);
     return;
   }
   const tmpDir = path.join(THUMB_DIR, '_ql_' + process.pid + '_' + crypto.randomBytes(4).toString('hex'));
@@ -779,8 +1062,9 @@ async function serveThumb(req, res, p, size) {
   const e = ext(src);
   const isImg = THUMB_IMG_EXT.has(e);
   const key = crypto.createHash('md5').update(src + ':' + st.mtimeMs + ':' + s).digest('hex');
-  const cacheFile = path.join(THUMB_DIR, key + (isImg ? '.jpg' : '.png'));
-  const type = isImg ? 'image/jpeg' : 'image/png';
+  const jpegOut = isImg && !ALPHA_IMG_EXT.has(e);
+  const cacheFile = path.join(THUMB_DIR, key + (jpegOut ? '.jpg' : '.png'));
+  const type = jpegOut ? 'image/jpeg' : 'image/png';
   const sendCache = () => {
     res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'max-age=604800' });
     const rs = fs.createReadStream(cacheFile);
@@ -1518,9 +1802,28 @@ const server = http.createServer(async (req, res) => {
       try { return sendJSON(res, 200, await writeTextFile(b.path, b.content, b.expectedMtime)); }
       catch (e) { return sendJSON(res, 200, { ok: false, conflict: !!e.conflict, error: e.message }); }
     }
+    if (p === '/api/archive') {
+      return sendJSON(res, 200, await archiveList(url.searchParams.get('path')));
+    }
+    if (p === '/api/du') {
+      return sendJSON(res, 200, await diskUsage(url.searchParams.get('path')));
+    }
+    if (p === '/api/project-memory') {
+      return sendJSON(res, 200, await projectMemory(url.searchParams.get('path')));
+    }
+    if (p === '/api/release/inspect') {
+      return sendJSON(res, 200, await releaseInspect(url.searchParams.get('path')));
+    }
+    if (p === '/api/release/prepare' && req.method === 'POST') {
+      return sendJSON(res, 200, await releasePrepare(await readBody(req)));
+    }
     if (p === '/api/trash' && req.method === 'POST') {
       const b = await readBody(req);
       return sendJSON(res, 200, await trashPath(b.path));
+    }
+    if (p === '/api/move' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await movePath(b.src, b.dstDir));
     }
     if (p === '/api/rename' && req.method === 'POST') {
       const b = await readBody(req);

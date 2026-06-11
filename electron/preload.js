@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('fanboxDrop', {
   saveTemp: (name, buf) => ipcRenderer.invoke('drop:save', { name, buf }),
 });
 
+contextBridge.exposeInMainWorld('fanboxShot', {
+  // 系统截屏落盘事件（截图直通车）
+  onNew: (cb) => { const h = (e, m) => cb(m); ipcRenderer.on('shot:new', h); return () => ipcRenderer.removeListener('shot:new', h); },
+});
+
 contextBridge.exposeInMainWorld('fanboxUpdate', {
   onAvailable: (cb) => { const h = (e, m) => cb(m); ipcRenderer.on('update:available', h); return () => ipcRenderer.removeListener('update:available', h); },
   get: () => ipcRenderer.invoke('update:get'), // 拉一把启动早期可能错过的推送
