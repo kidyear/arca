@@ -1163,3 +1163,51 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 .nav-section.nav-collapsed .nav-list { display: none; }
 /* Agent 项目就算展开也别无限长，内部滚动,别把下面区块顶出视野 */
 #agent-projects-list { max-height: 230px; overflow-y: auto; }
+/* ============================================================
+   FanBox 皮肤 4 · 信步 SEAVO  —— 可直接落地的 drop-in
+   把这段整体粘进 public/style.css 末尾（皮肤 1/2/3 之后）。
+   变量名与 FanBox 现有皮肤契约完全一致，零改其它代码。
+   接入三步见本目录 README.md。
+   ============================================================ */
+
+/* 皮肤 4 · 信步设计系统（暖纸 × 火焰橘红 × 暖墨 × 细线 × 近直角 × DIN Pro） */
+[data-theme="seavo"] {
+  --bg: #F7F4EF; --bg-2: #FFFFFF; --bg-3: #EFEBE3; --panel: #FBFAF7;
+  --border: #E0DAD0; --rule: #E0DAD0;
+  --text: #16140F; --text-dim: #595249; --text-faint: #A39B8E;
+  --accent: #E94A16; --accent-soft: #E94A1614; --accent-ink: #FFFFFF;
+  --green: #3C7D4F; --yellow: #C2861B;
+  --radius: 4px;                 /* 近直角 · 机加工几何，对齐 SEAVO 字标 */
+  --shadow: 0 8px 28px rgba(22, 20, 15, 0.10);  /* 暖中性低阴影，永不发光 */
+  /* 思源黑体 UI；DIN Pro 用于品牌名/面包屑末级/数字徽章 */
+  --font-display: 'DIN Pro', -apple-system, "PingFang SC", sans-serif;
+  --font-fname: var(--font-ui);
+  --font-mono: 'DIN Pro', ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* DIN Pro 正版字体（把 5 个 .otf 拷到 public/vendor/fonts/ 后启用） */
+@font-face { font-family: 'DIN Pro'; font-weight: 300; src: url('/vendor/fonts/DINPro-Light.otf')   format('opentype'); font-display: swap; }
+@font-face { font-family: 'DIN Pro'; font-weight: 400; src: url('/vendor/fonts/DINPro-Regular.otf') format('opentype'); font-display: swap; }
+@font-face { font-family: 'DIN Pro'; font-weight: 500; src: url('/vendor/fonts/DINPro-Medium.otf')  format('opentype'); font-display: swap; }
+@font-face { font-family: 'DIN Pro'; font-weight: 700; src: url('/vendor/fonts/DINPro-Bold.otf')    format('opentype'); font-display: swap; }
+@font-face { font-family: 'DIN Pro'; font-weight: 800 900; src: url('/vendor/fonts/DINPro-Black.otf') format('opentype'); font-display: swap; }
+
+/* 信步纸张微纹理（极轻，安静——「少即力量」）*/
+[data-theme="seavo"] body {
+  background-image: radial-gradient(rgba(120, 90, 55, 0.035) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+/* 信步排印：品牌名思源黑体加粗，副标 + 面包屑末级走 DIN Pro 工程数字感 */
+[data-theme="seavo"] .brand-sub { font-family: var(--font-display); letter-spacing: 3px; font-weight: 600; }
+[data-theme="seavo"] .nav-title { letter-spacing: 1.4px; }
+
+/* 信步徽章：NODE/web 等项目类型徽章统一近直角 + DIN 数字 */
+[data-theme="seavo"] .proj-tag { border-radius: 3px; letter-spacing: .04em; }
+
+/* 终端 agent 态势点：运行中用 SEAVO success 绿、安静脉冲（不刺眼） */
+[data-theme="seavo"] .term-tab .tab-dot.busy { background: var(--green); }
+
+/* 主操作（打开/发送/启动）保持火焰填充；hover 加深，不发光 */
+[data-theme="seavo"] .preview-actions button.primary:hover,
+[data-theme="seavo"] .chat-send-btn:hover { background: #D04013; }

@@ -178,7 +178,7 @@ window.__svgVideo = richIcon({ name: '_.mp4', kind: 'video' }, 40);
 
 const state = {
   cwd: null, home: null, platform: 'darwin', sep: '/',
-  theme: localStorage.getItem('fb_theme') || 'terminal',
+  theme: localStorage.getItem('fb_theme') || 'seavo', // 公司版默认信步皮肤(SEAVO 设计系统)
   entries: [], project: null, history: [],
   view: localStorage.getItem('fb_view') || 'grid',
   gridSize: localStorage.getItem('fb_gridsize') || 'md',
@@ -2157,7 +2157,8 @@ function updateGridSizeVisibility() {
 
 // ---------- 主题 / 皮肤 ----------
 function applyTheme(skin, rerender = true) {
-  if (!['terminal', 'warm', 'editorial'].includes(skin)) skin = 'terminal';
+  if (!['seavo', 'terminal', 'warm', 'editorial'].includes(skin)) skin = 'seavo';
+  // 信步皮肤是亮色系,代码高亮跟 warm/editorial 一样走 github 亮色主题
   state.theme = skin;
   document.documentElement.dataset.theme = skin;
   localStorage.setItem('fb_theme', skin);
@@ -2201,6 +2202,12 @@ const term = {
       background: '#eae5d8', foreground: '#1a1a1a', cursor: '#ff433d', cursorAccent: '#eae5d8', selectionBackground: '#ff433d22',
       black: '#0a0a0a', red: '#cc1f1a', green: '#00803a', yellow: '#8a6d00', blue: '#0000cc', magenta: '#9a2a8a', cyan: '#007a8a', white: '#57534a',
       brightBlack: '#57534a', brightRed: '#e8302a', brightGreen: '#00a33e', brightYellow: '#a67c00', brightBlue: '#2222dd', brightMagenta: '#b03aa0', brightCyan: '#008a9a', brightWhite: '#0a0a0a',
+    },
+    // 信步 SEAVO（公司版）：暖纸 × 火焰橘红 × 暖墨，按设计系统 ANSI 映射
+    seavo: {
+      background: '#F7F4EF', foreground: '#16140F', cursor: '#E94A16', cursorAccent: '#F7F4EF', selectionBackground: '#E94A1622',
+      black: '#16140F', red: '#C2401A', green: '#3C7D4F', yellow: '#C2861B', blue: '#3A5A7A', magenta: '#8A4A6A', cyan: '#3A7A70', white: '#595249',
+      brightBlack: '#A39B8E', brightRed: '#E94A16', brightGreen: '#4C8D5F', brightYellow: '#D2962B', brightBlue: '#4A6A8A', brightMagenta: '#9A5A7A', brightCyan: '#4A8A80', brightWhite: '#16140F',
     },
   },
   theme() { return this.themes[state.theme] || this.themes.terminal; },
