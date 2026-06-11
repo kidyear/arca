@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 翻箱 FanBox — Electron 主进程
+ * FanBox — Electron 主进程
  *
  * 复用零依赖后端 server.js（文件能力），叠加 node-pty 内嵌终端，
  * 让 TUI coding agent（Claude Code / Codex / Aider…）在界面里直接跑起来。
@@ -80,13 +80,17 @@ app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) {
     try { app.dock.setIcon(nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icon.png'))); } catch { /* */ }
   }
-  app.setName('翻箱 FanBox');
+  app.setName('FanBox');
   buildMenu();
   createWindow();
   startShotWatch();
-  // 启动 6 秒后查一次新版本（不挡启动），长开会话每 12 小时再查
+  // 启动 6 秒后查一次新版本（不挡启动）；长开会话每 2 小时再查；
+  // 窗口重新聚焦也顺手查（30 分钟节流）——否则发版当天老 app 要等满周期才知道有新版
   setTimeout(checkUpdate, 6000);
-  setInterval(checkUpdate, 12 * 3600 * 1000);
+  setInterval(checkUpdate, 2 * 3600 * 1000);
+  app.on('browser-window-focus', () => {
+    if (Date.now() - lastAutoCheck > 30 * 60 * 1000) checkUpdate();
+  });
 });
 
 // ---------- 截图直通车：监听系统截屏落盘，新截图推给渲染层浮出直通卡 ----------
@@ -173,15 +177,17 @@ async function fetchLatestRelease(src) {
 let pendingUpdate = null; // 渲染层晚注册监听也能拉到（启动 6 秒的推送 vs init 加载大目录，谁先谁后说不准）
 let updRetry = 0;
 let lastUpdateUrl = ''; // update:open 只允许打开本轮检测拿到的链接，不开任意 URL
+let lastAutoCheck = 0;   // 窗口聚焦补查的节流基准（上游 v1.7.0）
 async function checkUpdate(opts) {
   const manual = !!(opts && opts.manual);
+  if (!manual) lastAutoCheck = Date.now();
   const owner = () => (win && !win.isDestroyed() ? win : undefined);
   const src = updateSource();
   if (!src) {
     if (manual) {
       dialog.showMessageBoxSync(owner(), {
-        type: 'info', buttons: ['好'], message: '更新检测未启用',
-        detail: '内部分发版默认关闭。配置内网更新源（config.json 的 updateUrl）后可用。',
+        type: 'info', buttons: [M('好', 'OK')], message: M('更新检测未启用', 'Update check disabled'),
+        detail: M('内部分发版默认关闭。配置内网更新源（config.json 的 updateUrl）后可用。', 'Disabled for internal builds. Set "updateUrl" in config.json to enable.'),
       });
     }
     return;
@@ -191,10 +197,12 @@ async function checkUpdate(opts) {
   if (!info) {
     if (manual) {
       dialog.showMessageBoxSync(owner(), {
-        type: 'warning', buttons: ['好'], message: '检查更新失败',
-        detail: src.type === 'feed' ? '没连上公司更新服务器，稍后再试。' : '没连上 GitHub（网络问题或接口限流），稍后再试。',
+        type: 'warning', buttons: [M('好', 'OK')], message: M('检查更新失败', 'Update check failed'),
+        detail: src.type === 'feed'
+          ? M('没连上公司更新服务器，稍后再试。', 'Could not reach the company update server. Try again later.')
+          : M('没连上 GitHub（网络问题或接口限流），稍后再试。', 'Could not reach GitHub (network issue or rate limit). Try again later.'),
       });
-    } else if (updRetry < 3) { updRetry++; setTimeout(checkUpdate, 10 * 60 * 1000); } // 失败别干等 12 小时
+    } else if (updRetry < 3) { updRetry++; setTimeout(checkUpdate, 10 * 60 * 1000); } // 失败别干等
     return;
   }
   updRetry = 0;
@@ -208,15 +216,15 @@ async function checkUpdate(opts) {
   if (manual) {
     if (newer) {
       const c = dialog.showMessageBoxSync(owner(), {
-        type: 'info', buttons: ['去下载', '取消'], defaultId: 0, cancelId: 1,
-        message: `发现新版本 v${pendingUpdate.version}`,
-        detail: `当前版本 v${app.getVersion()}。点「去下载」打开下载页，装好后替换旧版即可。`,
+        type: 'info', buttons: [M('去下载', 'Download'), M('取消', 'Cancel')], defaultId: 0, cancelId: 1,
+        message: M(`发现新版本 v${pendingUpdate.version}`, `New version v${pendingUpdate.version} available`),
+        detail: M(`当前版本 v${app.getVersion()}。点「去下载」打开下载页，装好后替换旧版即可。`, `You are on v${app.getVersion()}. "Download" opens the download page.`),
       });
       if (c === 0) shell.openExternal(pendingUpdate.url);
     } else {
       dialog.showMessageBoxSync(owner(), {
-        type: 'info', buttons: ['好'], message: '已是最新版本',
-        detail: `当前版本 v${app.getVersion()} 就是最新发布版。`,
+        type: 'info', buttons: [M('好', 'OK')], message: M('已是最新版本', 'You are up to date'),
+        detail: M(`当前版本 v${app.getVersion()} 就是最新发布版。`, `v${app.getVersion()} is the latest release.`),
       });
     }
   }
@@ -226,33 +234,43 @@ ipcMain.handle('update:open', (e, { url }) => {
 });
 ipcMain.handle('update:get', () => pendingUpdate);
 
+// 界面语言：用户手动选过的存在 ~/.fanbox/config.json（渲染层切换时写入），没选过跟随系统
+function uiLang() {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.fanbox', 'config.json'), 'utf8'));
+    if (c.lang === 'zh' || c.lang === 'en') return c.lang;
+  } catch { /* 没配置过 */ }
+  return String(app.getLocale() || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+const M = (zh, en) => (uiLang() === 'zh' ? zh : en);
+
 // 原生菜单——关键是 Edit role，终端里的 ⌘C/⌘V 才生效
 function buildMenu() {
   const isMac = process.platform === 'darwin';
   const template = [
-    ...(isMac ? [{ label: '翻箱 FanBox', submenu: [
-      { role: 'about', label: '关于 翻箱 FanBox' },
-      { label: '检查更新…', click: () => checkUpdate({ manual: true }) },
+    ...(isMac ? [{ label: 'FanBox', submenu: [
+      { role: 'about', label: M('关于 FanBox', 'About FanBox') },
+      { label: M('检查更新…', 'Check for Updates…'), click: () => checkUpdate({ manual: true }) },
       { type: 'separator' },
-      { role: 'hide', label: '隐藏 翻箱 FanBox' }, { role: 'hideOthers', label: '隐藏其他' }, { role: 'unhide', label: '全部显示' },
+      { role: 'hide', label: M('隐藏 FanBox', 'Hide FanBox') }, { role: 'hideOthers', label: M('隐藏其他', 'Hide Others') }, { role: 'unhide', label: M('全部显示', 'Show All') },
       { type: 'separator' },
-      { role: 'quit', label: '退出 翻箱 FanBox' },
+      { role: 'quit', label: M('退出 FanBox', 'Quit FanBox') },
     ] }] : []),
-    { label: '文件', submenu: [
-      ...(isMac ? [] : [{ label: '检查更新…', click: () => checkUpdate({ manual: true }) }, { type: 'separator' }]),
+    { label: M('文件', 'File'), submenu: [
+      ...(isMac ? [] : [{ label: M('检查更新…', 'Check for Updates…'), click: () => checkUpdate({ manual: true }) }, { type: 'separator' }]),
       isMac ? { role: 'close' } : { role: 'quit' },
     ] },
-    { label: '编辑', submenu: [
-      { role: 'undo', label: '撤销' }, { role: 'redo', label: '重做' }, { type: 'separator' },
-      { role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' },
-      { role: 'selectAll', label: '全选' },
+    { label: M('编辑', 'Edit'), submenu: [
+      { role: 'undo', label: M('撤销', 'Undo') }, { role: 'redo', label: M('重做', 'Redo') }, { type: 'separator' },
+      { role: 'cut', label: M('剪切', 'Cut') }, { role: 'copy', label: M('复制', 'Copy') }, { role: 'paste', label: M('粘贴', 'Paste') },
+      { role: 'selectAll', label: M('全选', 'Select All') },
     ] },
-    { label: '视图', submenu: [
-      { role: 'reload', label: '重新加载' }, { role: 'toggleDevTools', label: '开发者工具' },
+    { label: M('视图', 'View'), submenu: [
+      { role: 'reload', label: M('重新加载', 'Reload') }, { role: 'toggleDevTools', label: M('开发者工具', 'Developer Tools') },
       { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
-      { type: 'separator' }, { role: 'togglefullscreen', label: '全屏' },
+      { type: 'separator' }, { role: 'togglefullscreen', label: M('全屏', 'Full Screen') },
     ] },
-    { role: 'window', label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'zoom' }] },
+    { role: 'window', label: M('窗口', 'Window'), submenu: [{ role: 'minimize', label: M('最小化', 'Minimize') }, { role: 'zoom' }] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -264,11 +282,11 @@ app.on('before-quit', (e) => {
   e.preventDefault();
   const choice = dialog.showMessageBoxSync(win && !win.isDestroyed() ? win : undefined, {
     type: 'warning',
-    buttons: ['取消', '退出'],
+    buttons: [M('取消', 'Cancel'), M('退出', 'Quit')],
     defaultId: 0,
     cancelId: 0,
-    message: `还有 ${terminals.size} 个终端会话在运行`,
-    detail: '退出会终止正在运行的 agent 任务，确定退出？',
+    message: M(`还有 ${terminals.size} 个终端会话在运行`, `${terminals.size} terminal session(s) still running`),
+    detail: M('退出会终止正在运行的 agent 任务，确定退出？', 'Quitting will terminate running agent tasks. Quit anyway?'),
   });
   if (choice === 1) { quitConfirmed = true; app.quit(); }
 });

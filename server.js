@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 翻箱 FanBox — 本地文件指挥中心后端
+ * FanBox — 本地文件指挥中心后端
  *
  * 纯 Node 内置模块，零依赖。只绑定 127.0.0.1，浏览器界面是唯一入口。
  * 这是一个本地个人工具：你的机器、你的文件，服务只在本机回环地址监听。
@@ -461,7 +461,7 @@ function trashPath(p) {
       let msg = err.message;
       // Finder 自动化未授权（-1743/-600）给人话
       if (PLATFORM === 'darwin' && /-1743|-600|not allowed|authoriz/i.test(msg)) {
-        msg = '需在「系统设置 → 隐私与安全性 → 自动化」里允许翻箱控制 Finder（首次删除会弹授权）';
+        msg = '需在「系统设置 → 隐私与安全性 → 自动化」里允许 FanBox 控制 Finder（首次删除会弹授权）';
       }
       resolve({ ok: false, error: msg });
     });
@@ -482,6 +482,94 @@ async function renamePath(p, newName) {
   if (fs.existsSync(dst)) throw new Error('已存在同名项');
   await fsp.rename(src, dst);
   return { ok: true, path: dst };
+}
+
+// ---------- AI 整理：备料 + 在内嵌终端拉起交互式 agent（v2，对话式；v1 headless 提案已废弃）----------
+// 翻箱不再后台跑 claude -p：把整理偏好、过往整理历史、工作约定写成 brief 文件，
+// 前端在内嵌终端启动 claude/codex，方案摊给用户对话确认后由 agent 动手。
+// 约定：agent 每批移动追加写 ORGANIZE_LOG_DIR 回滚日志（撤销在对话里完成）、收尾把新学到的偏好沉淀进 prefs 文件。
+const ORGANIZE_LOG_DIR = path.join(CONFIG_DIR, 'organize-log');
+const ORGANIZE_PREFS_FILE = path.join(CONFIG_DIR, 'organize-prefs.md');
+const ORGANIZE_BRIEF_FILE = path.join(CONFIG_DIR, 'organize-brief.md');
+const DEFAULT_ORGANIZE_STRATEGY = `- 默认归档：过时/低频的文件移入 _archive/ 下的语义子目录（如 _archive/截图/2026-06/）
+- 同一主题的散文件归进语义明确的项目文件夹（项目制：一个项目一个文件夹，按需建议新文件夹）
+- 归档之外，单独提一份「建议删除」清单（什么算该删由你判断：明显垃圾、可再生成的产物、过期大文件……），逐条给理由
+- 删除须用户逐条点头；确认后移入废纸篓 ~/.Trash/（不直接 rm），并照常记进回滚日志
+- 最近 7 天内有动静的文件视为正在进行的工作，不要动
+- 文件夹一律不动，只整理松散文件
+- 拿不准的单独列出来问，宁可少动不要乱动`;
+
+async function findAgentBin(name) {
+  // GUI 启动的 app 没有用户 shell 的 PATH，走登录 shell 找一次绝对路径
+  return new Promise((resolve) => {
+    execFile('/bin/zsh', ['-lc', `command -v ${name}`], { timeout: 8000 }, (err, stdout) => {
+      const out = String(stdout || '').trim().split('\n').pop();
+      resolve(!err && out && out.startsWith('/') ? out : null);
+    });
+  });
+}
+
+// 最近几次整理日志的一句话摘要，给 agent 当历史参照（日志由 agent 按 brief 约定写入）
+async function organizeHistory() {
+  let files = [];
+  try { files = (await fsp.readdir(ORGANIZE_LOG_DIR)).filter((f) => f.endsWith('.json')); } catch { return ''; }
+  files.sort().reverse();
+  const lines = [];
+  for (const f of files.slice(0, 3)) {
+    try {
+      const log = JSON.parse(await fsp.readFile(path.join(ORGANIZE_LOG_DIR, f), 'utf8'));
+      const m0 = (log.moves || [])[0];
+      const sample = m0 ? `（如 ${path.basename(m0.from)} → ${path.relative(log.dir, m0.to)}）` : '';
+      lines.push(`- ${new Date(log.at).toLocaleString('zh-CN')} 整理过 ${log.dir}，移动 ${(log.moves || []).length} 项${sample}`);
+    } catch { /* 坏日志跳过 */ }
+  }
+  return lines.join('\n');
+}
+
+// 备料并返回终端启动命令：brief 写盘（偏好 + 历史 + 工作约定），前端用 term.runInDir 拉起交互式 agent
+async function organizeLaunch(b) {
+  const dir = resolvePath(b.path);
+  const cfg = await readConfig();
+  let engine = cfg.organizeEngine === 'codex' ? 'codex' : 'claude';
+  if (!(await findAgentBin(engine))) {
+    const alt = engine === 'claude' ? 'codex' : 'claude';
+    if (await findAgentBin(alt)) engine = alt;
+    else return { ok: false, error: '没找到 claude / codex 命令——AI 整理需要装其中一个 CLI' };
+  }
+  const prefs = await fsp.readFile(ORGANIZE_PREFS_FILE, 'utf8').catch(() => '');
+  const history = await organizeHistory();
+  const brief = `# AI 整理任务（翻箱 FanBox 生成，每次启动覆盖本文件）
+
+你在翻箱的内嵌终端里，帮用户对话式整理这个文件夹：${dir}
+
+## 工作流程
+1. 先看现状：列出当前文件夹的松散文件（名字/类型/大小/修改时间）。文件夹和隐藏文件一律不动
+2. 结合下面的整理偏好与历史，提出分组整理方案摊给用户——用户明确同意前，一个文件都不要动
+3. 用户可能口头调整方案（「截图不动」「这几个归到XX」），以对话为准
+4. 动手用 mv 移动，目标目录不存在先 mkdir -p
+5. 每完成一批移动，按下面的格式写一份回滚日志，并告诉用户「想撤销随时说」
+6. 收尾：把这次对话里新学到的用户偏好（规则/例外/纠正）一条一行追加进偏好文件，别重复已有条目
+
+## 回滚日志（撤销能力全靠它，格式不能错）
+每批移动写一个新文件 ${ORGANIZE_LOG_DIR}/<毫秒时间戳>.json，内容：
+{"dir":"${dir}","at":<毫秒时间戳>,"moves":[{"from":"<移动前绝对路径>","to":"<移动后绝对路径>"}]}
+用户要撤销时：读对应日志，逐条把 to 移回 from（from 位置已被占用的跳过并说明）
+
+## 整理偏好（用户的长期规则，优先级最高）
+${DEFAULT_ORGANIZE_STRATEGY}
+${prefs.trim() ? `\n### 历次整理沉淀的偏好\n${prefs.trim()}\n` : ''}
+## 偏好文件
+${ORGANIZE_PREFS_FILE}（markdown 列表，新偏好追加在末尾）
+
+## 最近整理历史
+${history || '（还没有历史记录）'}
+`;
+  await fsp.mkdir(ORGANIZE_LOG_DIR, { recursive: true });
+  await fsp.writeFile(ORGANIZE_BRIEF_FILE, brief, 'utf8');
+  const kickoff = `先完整读 ${ORGANIZE_BRIEF_FILE}，然后按里面的约定，和我对话式整理当前文件夹`;
+  // claude 跳权限确认（动手前方案已过人）；codex 用 full-auto（工作区内可写、不逐条审批）
+  const cmd = engine === 'codex' ? `codex --full-auto "${kickoff}"` : `claude --dangerously-skip-permissions "${kickoff}"`;
+  return { ok: true, engine, cmd };
 }
 
 // ---------- 发版向导：检查项目状态 → 改版本号/CHANGELOG → 命令序列交给内嵌终端跑（每步可见可拦）----------
@@ -808,27 +896,51 @@ async function createEntry(parentPath, name, type) {
 // → scrollback 回扫候选（alt）逐个 stat → 多根 basename 搜索。
 // 空格扩展：前端对带空格的文件名（macOS 截屏等）只能保守匹配到第一个空格，真实边界
 // 由文件系统验证——把行尾余文按空格边界逐段拼回路径，哪个候选 stat 命中就是哪个
+// 直接 stat + 行尾余文空格扩展（macOS 截屏名「截屏2026-06-10 15.37.43.png」靠这步补全）。
+// locatePath 的前半段；也单独服务终端划线前的显示时验证
+async function statWithTail(p, tail) {
+  const tryStat = async (cand) => {
+    try { const real = resolvePath(cand); const st = await fsp.stat(real); return { found: true, path: real, isDir: st.isDirectory() }; }
+    catch { return null; }
+  };
+  if (!p) return null;
+  const direct = await tryStat(p);
+  if (direct) return direct;
+  if (tail) {
+    const t = String(tail).slice(0, 160).split(/['"`]/)[0];
+    const cands = [];
+    const re = /\s+/g; let m;
+    while ((m = re.exec(t)) !== null && cands.length < 6) { if (m.index > 0) cands.push(p + t.slice(0, m.index)); }
+    if (t.trim() && cands.length < 6) cands.push(p + t.replace(/\s+$/, ''));
+    cands.sort((a, b) => b.length - a.length); // 长优先：偏向完整文件名
+    for (const c of cands) {
+      const hit = await tryStat(c.replace(/[)\]'"`,.:;。，]+$/, ''));
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+// 终端划线前的批量验证：候选路径 stat 得到才配下划线，中文散文里的「分发/产品演示」不再误标
+async function termVerify(b) {
+  const cwd = b.cwd ? resolvePath(b.cwd) : HOME;
+  const items = Array.isArray(b.items) ? b.items.slice(0, 24) : [];
+  const results = await Promise.all(items.map(async (it) => {
+    if (!it || typeof it.cand !== 'string') return false;
+    let p = it.cand;
+    if (!p.startsWith('/') && !p.startsWith('~')) p = cwd.replace(/\/$/, '') + '/' + p.replace(/^\.\//, '');
+    return !!(await statWithTail(p, it.tail || ''));
+  }));
+  return { ok: true, results };
+}
+
 async function locatePath(p, name, root, tail, alt, roots) {
   const tryStat = async (cand) => {
     try { const real = resolvePath(cand); const st = await fsp.stat(real); return { found: true, path: real, isDir: st.isDirectory() }; }
     catch { return null; }
   };
-  if (p) {
-    const direct = await tryStat(p);
-    if (direct) return direct;
-    if (tail) {
-      const t = String(tail).slice(0, 160).split(/['"`]/)[0];
-      const cands = [];
-      const re = /\s+/g; let m;
-      while ((m = re.exec(t)) !== null && cands.length < 6) { if (m.index > 0) cands.push(p + t.slice(0, m.index)); }
-      if (t.trim() && cands.length < 6) cands.push(p + t.replace(/\s+$/, ''));
-      cands.sort((a, b) => b.length - a.length); // 长优先：偏向完整文件名
-      for (const c of cands) {
-        const hit = await tryStat(c.replace(/[)\]'"`,.:;。，]+$/, ''));
-        if (hit) return hit;
-      }
-    }
-  }
+  const direct = await statWithTail(p, tail);
+  if (direct) return direct;
   // scrollback 回扫候选（最近出现在前）：stat 验证，命中即信——它来自 agent 自己打印的全路径
   for (const a of String(alt || '').split('\n').filter(Boolean).slice(0, 3)) {
     const hit = await tryStat(a);
@@ -1820,6 +1932,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/recent') {
       return sendJSON(res, 200, await recentFiles(qp.get('root') || HOME));
     }
+    if (p === '/api/term-verify' && req.method === 'POST') {
+      return sendJSON(res, 200, await termVerify(await readBody(req)));
+    }
     if (p === '/api/locate') {
       const extraRoots = String(qp.get('roots') || '').split('\n').filter(Boolean).slice(0, 3);
       return sendJSON(res, 200, await locatePath(qp.get('path'), qp.get('name'), qp.get('root'), qp.get('tail'), qp.get('alt'), extraRoots));
@@ -1864,6 +1979,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/project-memory') {
       return sendJSON(res, 200, await projectMemory(url.searchParams.get('path')));
+    }
+    if (p === '/api/lang' && req.method === 'POST') {
+      const b = await readBody(req);
+      const lang = b.lang === 'en' ? 'en' : 'zh';
+      await updateConfig((c) => { c.lang = lang; });
+      return sendJSON(res, 200, { ok: true, lang });
+    }
+    if (p === '/api/organize/launch' && req.method === 'POST') {
+      return sendJSON(res, 200, await organizeLaunch(await readBody(req)));
     }
     if (p === '/api/release/inspect') {
       return sendJSON(res, 200, await releaseInspect(url.searchParams.get('path')));
@@ -1938,7 +2062,7 @@ const server = http.createServer(async (req, res) => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\n  ⚠️  端口 ${PORT} 已被占用——翻箱很可能已经在运行了。`);
+    console.error(`\n  ⚠️  端口 ${PORT} 已被占用——FanBox 很可能已经在运行了。`);
     console.error(`      直接打开浏览器访问  http://localhost:${PORT}  就行；`);
     console.error(`      想另开一个，换端口：FANBOX_PORT=8080 node server.js\n`);
   } else {
@@ -1949,7 +2073,7 @@ server.on('error', (err) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   const link = `http://localhost:${PORT}`;
-  console.log('\n  📦  翻箱 FanBox 已启动');
+  console.log('\n  📦  FanBox 已启动');
   console.log(`  🔗  ${link}`);
   console.log('  🏠  根目录:', HOME);
   console.log('\n  按 Ctrl+C 退出\n');

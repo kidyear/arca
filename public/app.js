@@ -1,4 +1,4 @@
-/* 翻箱 FanBox 前端 */
+/* FanBox 前端 */
 'use strict';
 
 const $ = (s) => document.querySelector(s);
@@ -1496,6 +1496,15 @@ async function memoryPanel(dirPath) {
   });
 }
 
+// AI 整理：一键在内嵌终端拉起交互式 agent（claude/codex）对话式整理。
+// 翻箱只备料——把整理偏好、过往整理历史、工作约定写成 brief 文件，agent 读完先摊方案，
+// 你在终端里对话确认/调整后它才动手；每批移动写回滚日志，想撤销在对话里说一声就行
+async function organizeLaunch(dirPath) {
+  const r = await apiPost('/api/organize/launch', { path: dirPath });
+  if (!r.ok) { toast(r.error || 'AI 整理启动失败', true); return; }
+  term.runInDir(dirPath, r.cmd, `${r.engine === 'codex' ? 'Codex' : 'Claude'} 已开聊——先摊方案，你点头它才动手`);
+}
+
 // 发版向导：版本号 + 发布说明（预填 CHANGELOG 的 Unreleased 段）→ 命令序列在内嵌终端跑，每步可见可拦
 async function releasePanel() {
   const dirPath = state.cwd;
@@ -1581,6 +1590,7 @@ function showContextMenu(ev, e) {
   const items = [];
   if (e.isDir) items.push({ label: '打开', fn: () => navigate(e.path) });
   else items.push({ label: '预览', fn: () => { state.selected = e.path; openPreview(e); renderFiles(); } });
+  if (e.isDir) items.push({ label: 'AI 整理…', fn: () => organizeLaunch(e.path) });
   if (e.isDir) items.push({ label: '磁盘占用透视', fn: () => diskPanel(e.path) });
   if (e.isDir) items.push({ label: '在终端打开', fn: () => term.openInDir(e.path) });
   else items.push({ label: '在所在目录开终端', fn: () => term.openInDir(dirOf(e.path)) });
@@ -1901,7 +1911,7 @@ function maybeShowGuide() {
   ov.className = 'guide-overlay';
   ov.innerHTML = `<div class="guide-card">
     <div class="guide-logo">${svgWrap(SVG.box, 'currentColor', 46, true)}</div>
-    <h2>欢迎用翻箱 FanBox</h2>
+    <h2>欢迎用 FanBox</h2>
     <p>vibe coding 的驾驶舱——找文件、跑 agent、看它改、随手改，都在一个窗口：</p>
     <ul>
       <li><b>${MOD}K</b> 全局搜文件和文件夹；<b>${MOD}↵</b> 把项目直接在编辑器整包打开；<code>内容:关键词</code> 搜文件里的字</li>
@@ -2068,16 +2078,21 @@ function bindEvents() {
   // 全局兜底：文件拖到窗口其它区域松手时，阻止 Electron 导航到 file:// 顶掉整个界面
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', (e) => e.preventDefault());
-  // 文件区空白处双击 → 新建菜单（原顶部筛选行已移除，新建入口收进这里）
-  $('#file-area').addEventListener('dblclick', (e) => {
-    if (e.target.closest('.item')) return; // 条目自身的双击是「打开」，不抢
+  // 文件区空白处双击/右键 → 新建菜单（#7：右键空白是更普遍的肌肉记忆）
+  const blankMenu = (e) => {
+    if (e.target.closest('.item') || e.target.closest('.row')) return; // 条目自身的菜单不抢
+    e.preventDefault();
     popupMenu(e, [
       { label: '新建文件夹…', fn: () => doCreate('dir') },
       { label: '新建文件…', fn: () => doCreate('file') },
       { sep: true },
+      { label: 'AI 整理…', fn: () => organizeLaunch(state.cwd) },
       { label: '磁盘占用透视', fn: () => diskPanel(state.cwd) },
     ]);
-  });
+  };
+  $('#file-area').addEventListener('dblclick', blankMenu);
+  $('#file-area').addEventListener('contextmenu', blankMenu);
+  $('#content').addEventListener('contextmenu', (e) => { if (!e.target.closest('#file-area')) blankMenu(e); });
   document.addEventListener('click', (e) => { if (!e.target.closest('#context-menu')) closeContextMenu(); });
   window.addEventListener('blur', closeContextMenu);
   $('#scope-toggle').onclick = () => cmdk.toggleScope();
@@ -2500,7 +2515,7 @@ const term = {
           const t = text.replace(/\s+$/, '');
           const links = []; const found = [];
           const overlaps = (s, e) => found.some((f) => s < f.e && e > f.s);
-          const push = (s, e, cand, tail) => {
+          const push = (s, e, cand, tail, act) => {
             if (e - s < 3 || overlaps(s, e)) return;
             const a = pos[s], b = pos[e - 1];
             if (!a || !b) return;
@@ -2509,10 +2524,16 @@ const term = {
               range: { start: { x: a.x, y: a.y }, end: { x: b.x + b.w - 1, y: b.y } },
               text: cand,
               decorations: { pointerCursor: true, underline: true },
-              activate: () => this.openTermPath(id, cand, tail, endRow),
+              activate: act || (() => this.openTermPath(id, cand, tail, endRow)),
             });
           };
           let m;
+          // 0. URL：直接系统浏览器打开（Electron 的 windowOpenHandler 会转 shell.openExternal）
+          const reU = /\bhttps?:\/\/[^\s'"`<>）（【】「」]+/g;
+          while ((m = reU.exec(t)) !== null) {
+            const url = m[0].replace(/[)\],.:;。，？！?!）】>]+$/, '');
+            push(m.index, m.index + url.length, url, '', () => window.open(url));
+          }
           // 1. 引号串：拖拽插入/agent 输出常用 '…' 包路径，内容像路径或文件名就整体认
           const reQ = /'([^']{3,})'|"([^"]{3,})"/g;
           while ((m = reQ.exec(t)) !== null) {
@@ -2520,7 +2541,7 @@ const term = {
             if (!inner.includes('/') && !inner.includes('\\') && !/\.[A-Za-z0-9]{1,8}$/.test(inner)) continue;
             push(m.index + 1, m.index + 1 + inner.length, inner, '');
           }
-          // 1b. Windows 盘符路径：C:\Users\… 或 C:/Users/…（仅 Windows 启用，避免别的平台误报）
+          // 1b. Windows 盘符路径：C:\Users\… 或 C:/Users/…（仅 Windows 启用——上游新正则只认正斜杠，反斜杠路径靠这块）
           if (state.platform === 'win32') {
             const reWin = /(?<![\w])[A-Za-z]:[\\/][^\s'"`()|<>]+/g;
             while ((m = reWin.exec(t)) !== null) {
@@ -2530,25 +2551,48 @@ const term = {
               push(m.index, m.index + raw.length, raw, tail);
             }
           }
-          // 2. 斜杠路径：高亮保守断在空格；点击时把行尾余文交给服务端做空格扩展 stat 验证
-          //（macOS 截屏「截屏2026-06-10 15.37.43.png」这类带空格文件名靠这步补全）
-          const reP = /(?<![\w:/.~\-])(?:~|\.{1,2})?\/[^\s'"`:()]+/gu;
+          // 2. 含斜杠的 token：宽进严出——整个 token 都收（.claude/x、写作/01-xx、/abs、~/x 全覆盖），
+          // 配不配下划线交给服务端 stat 验证（散文里的「分发/产品演示——……」会被验证刷掉）
+          const reP = /[^\s'"`:()（）「」【】<>]*\/[^\s'"`:()（）「」【】<>]*/g;
+          const r2 = [];
           while ((m = reP.exec(t)) !== null) {
-            const raw = m[0].replace(/[)\],.:;。，]+$/, '');
-            if (raw.length < 3) continue;
+            // 全角标点几乎不出现在路径里，却常把路径和后续散文粘成一个 token：切到第一个为止
+            const raw = m[0].split(/[，。、？！…—]+/)[0].replace(/[)\],.:;]+$/, '');
+            if (raw.length < 3 || !raw.includes('/') || /^https?:\/\//.test(raw)) continue;
+            if (overlaps(m.index, m.index + raw.length)) continue;
             const tail = t.slice(m.index + raw.length).split(/['"`]/)[0].slice(0, 160);
-            push(m.index, m.index + raw.length, raw, tail);
+            r2.push({ s: m.index, e: m.index + raw.length, cand: raw, tail });
           }
-          // 3. 裸文件名：unicode 字符类（调研.md 能点）+ 扩展名白名单（e.g/node.js 不误报）。
-          // 紧跟斜杠路径、只隔空格的裸名多半是同一带空格路径的后半段：点哪段都按完整串定位
-          //（真分离的如 ls /tmp foo.md，完整串 stat 不中会回落到 basename 搜索，不会开错）
-          while ((m = TERM_LINK_RE_BARE.exec(t)) !== null) {
-            const end = m.index + m[0].length;
-            const prev = found.find((f) => f.tail && f.e <= m.index && /^\s+$/.test(t.slice(f.e, m.index)));
-            if (prev) push(m.index, end, t.slice(prev.s, end), t.slice(end).split(/['"`]/)[0].slice(0, 160));
-            else push(m.index, end, m[0], '');
-          }
-          cb(links.length ? links : undefined);
+          const finish = () => {
+            // 3. 裸文件名：unicode 字符类（调研.md 能点）+ 扩展名白名单（e.g/node.js 不误报）。
+            // 紧跟斜杠路径、只隔空格的裸名多半是同一带空格路径的后半段：点哪段都按完整串定位
+            //（真分离的如 ls /tmp foo.md，完整串 stat 不中会回落到 basename 搜索，不会开错）
+            TERM_LINK_RE_BARE.lastIndex = 0;
+            let mm;
+            while ((mm = TERM_LINK_RE_BARE.exec(t)) !== null) {
+              const end = mm.index + mm[0].length;
+              const prev = found.find((f) => f.tail && f.e <= mm.index && /^\s+$/.test(t.slice(f.e, mm.index)));
+              if (prev) push(mm.index, end, t.slice(prev.s, end), t.slice(end).split(/['"`]/)[0].slice(0, 160));
+              else push(mm.index, end, mm[0], '');
+            }
+            cb(links.length ? links : undefined);
+          };
+          if (!r2.length) { finish(); return; }
+          const sess0 = this.sessions.find((x) => x.id === id);
+          const cwd0 = (sess0 && (sess0.cwd || sess0.startDir)) || state.cwd || '';
+          // 验证结果按 (cwd, cand, tail) 缓存：provideLinks 在鼠标移动时反复触发，别反复打接口
+          this._vCache = this._vCache || new Map();
+          const need = r2.filter((x) => !this._vCache.has(cwd0 + ' ' + x.cand + ' ' + x.tail));
+          const apply = () => {
+            r2.forEach((x) => { if (this._vCache.get(cwd0 + ' ' + x.cand + ' ' + x.tail)) push(x.s, x.e, x.cand, x.tail); });
+            finish();
+          };
+          if (!need.length) { apply(); return; }
+          apiPost('/api/term-verify', { cwd: cwd0, items: need.map((x) => ({ cand: x.cand, tail: x.tail })) }).then((res) => {
+            need.forEach((x, i) => this._vCache.set(cwd0 + ' ' + x.cand + ' ' + x.tail, !!(res.results && res.results[i])));
+            if (this._vCache.size > 600) { for (const k of this._vCache.keys()) { this._vCache.delete(k); if (this._vCache.size <= 400) break; } }
+            apply();
+          }).catch(() => finish()); // 验证不可用：宁可不划线，不要误标
         },
       });
     }
@@ -2643,6 +2687,10 @@ const term = {
         s.status = 'idle';
         this.renderTabs();
         this.refreshCwd(s); // 干完一段活，标题对齐终端真实目录
+        // 阶段性收工不报喜：底部状态行还挂着后台任务（「1 shell, 1 monitor still running」/「· 1 shell ·」），
+        // agent 跑完会被自动唤醒接着干——这会儿弹「完成」是误报。圆点照常变空闲，提醒全部按下，等真收工再响
+        const foot = this.tailText(s, 8);
+        if (/\bstill running\b/i.test(foot) || /·\s*\d+\s+(shells?|monitors?|tasks?|agents?)\b/i.test(foot)) return;
         const ask = dur > 600 && TERM_ASK_RE.test(tail); // 停在审批/确认界面：等你拍板（不设 4s 门槛，审批常来得很快）
         if (ask || dur > 1500) this.awaitGlow();
         if (ask) {
@@ -3887,7 +3935,7 @@ function bindUpdateNotice() {
     if (localStorage.getItem('fb_skip_ver') === version || document.querySelector('.update-pill')) return;
     const bar = document.createElement('div');
     bar.className = 'update-pill';
-    bar.innerHTML = `<span>新版本 v${escapeHtml(version)} 已发布</span><button class="up-go">下载</button><button class="up-x" title="这个版本不再提醒">✕</button>`;
+    bar.innerHTML = `<span>新版本 v${escapeHtml(version)} 已发布</span><button class="up-go">去下载</button><button class="up-x" title="这个版本不再提醒">✕</button>`;
     document.body.appendChild(bar);
     bar.querySelector('.up-go').onclick = () => { window.fanboxUpdate.open(url); bar.remove(); };
     bar.querySelector('.up-x').onclick = () => { localStorage.setItem('fb_skip_ver', version); bar.remove(); };

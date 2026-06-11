@@ -523,6 +523,11 @@ kbd {
 .rel-opts label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 .rel-hint { font-size: 11.5px; color: var(--orange, #e8a13c); }
 
+/* 语言切换 */
+.sidebar-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lang-toggle { cursor: pointer; color: var(--text-dim); font-size: 10.5px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 5px; flex: none; }
+.lang-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
 /* 截图直通车 */
 .shot-card {
   position: fixed; right: 18px; bottom: 18px; z-index: 300; width: 224px;
@@ -831,9 +836,11 @@ kbd {
    Windows/Linux 用系统原生标题栏（plat-win32/plat-linux），既不用避让也不用自绘拖拽区 */
 .desktop.plat-darwin #sidebar { padding-top: 40px; }
 .desktop.plat-darwin .brand { -webkit-app-region: drag; }
-.desktop.plat-darwin .brand .logo, .desktop.plat-darwin .brand-name, .desktop.plat-darwin .brand-sub { -webkit-app-region: no-drag; }
 /* 顶栏空白处也可拖窗，但其中的按钮/面包屑保持可点 */
 .desktop.plat-darwin #topbar { -webkit-app-region: drag; }
+/* 侧栏不做整体拖拽区：#sidebar 自身是滚动容器（overflow-y:auto），而 Electron 的
+   app-region:drag 区域收不到滚轮事件——整栏 drag 会让滚动时灵时卡（#6 的方案回退）。
+   拖窗用品牌区和顶栏，足够顺手 */
 .desktop.plat-darwin #topbar button, .desktop.plat-darwin #topbar .breadcrumb, .desktop.plat-darwin #topbar .seg, .desktop.plat-darwin #topbar .toggle, .desktop.plat-darwin #topbar input { -webkit-app-region: no-drag; }
 
 /* 终端头：跟随/定位 文字按钮 */
