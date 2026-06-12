@@ -8,6 +8,10 @@ on:
   push:
     tags: ['v*']
 
+# 新仓库 GITHUB_TOKEN 默认只读;建 Release 需要写权限
+permissions:
+  contents: write
+
 jobs:
   build-win:
     runs-on: windows-latest
