@@ -28,6 +28,29 @@ async function getQuery() {
   return _query;
 }
 
+// 引擎二进制(claude/claude.exe)的真实磁盘路径。
+// Electron 打包后 SDK 用 import.meta.url 自我定位,得到的是 app.asar 里的逻辑路径——
+// fs 读取有 asar 透明转发所以"文件存在",但 spawn 启动进程没有这层转发,
+// 直接报 "exists but failed to launch"(v1.0.0 Windows 真机踩坑)。
+// 修法:自己解析到 app.asar.unpacked 的真实文件,显式传 pathToClaudeCodeExecutable。
+function engineBinaryPath() {
+  try {
+    // ai.js 就在应用根目录(开发=仓库根,打包=app.asar 根),不走 require.resolve(SDK exports 不放行)
+    const scope = path.join(__dirname, 'node_modules', '@anthropic-ai');
+    const plat = `claude-agent-sdk-${process.platform}-${process.arch}`;
+    const bin = process.platform === 'win32' ? 'claude.exe' : 'claude';
+    const candidates = [
+      path.join(scope, 'claude-agent-sdk', 'node_modules', '@anthropic-ai', plat, bin), // 嵌套安装（打包产物里是这样）
+      path.join(scope, plat, bin),                                                      // 平铺安装（本地 npm 提升）
+    ];
+    for (const p of candidates) {
+      const real = p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+      if (fs.existsSync(real)) return real;
+    }
+  } catch { /* 让 SDK 自己解析（开发模式无 asar 没问题） */ }
+  return null;
+}
+
 // ---------- Provider 预设（全部 Anthropic 兼容端点）----------
 const PROVIDERS = {
   claude:   { label: 'Claude (官方)', baseUrl: '', models: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'], keyUrl: 'https://platform.claude.com/settings/keys', note: '不填 key 时用本机已登录的 Claude Code 账号（订阅额度）' },
@@ -392,6 +415,7 @@ module.exports = function createAI(ctx) {
           maxTurns: 100,
           abortController: ac,
           env,
+          pathToClaudeCodeExecutable: engineBinaryPath() || undefined,
           mcpServers: { docx: await buildDocxServer(chat.cwd) },
           systemPrompt: {
             type: 'preset', preset: 'claude_code',

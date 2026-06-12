@@ -1,6 +1,6 @@
 {
   "name": "arca",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "灵匣 Arca — 文件夹操作 × AI Agent 的结合体。匣中有灵:文件信手可得,活儿交给 AI 办。信步 SEAVO 公司版,基于开源 FanBox。",
   "bin": {
     "fanbox": "server.js"
@@ -30,7 +30,8 @@
     "npmRebuild": false,
     "asarUnpack": [
       "**/node_modules/node-pty/**",
-      "**/node_modules/@anthropic-ai/claude-agent-sdk/**"
+      "**/node_modules/@anthropic-ai/claude-agent-sdk/**",
+      "**/node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
