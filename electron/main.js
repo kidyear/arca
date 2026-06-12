@@ -140,12 +140,14 @@ function cmpVer(a, b) {
 // 1. 内网静态 JSON（公司分发推荐，员工不必能连 GitHub）：env FANBOX_UPDATE_URL 或
 //    ~/.fanbox/config.json 的 "updateUrl" 字段，指向 {"version":"1.6.0","url":"http://内网/安装包或下载页"}
 // 2. GitHub Releases：env FANBOX_UPDATE_REPO=org/repo
-// 3. 默认：macOS 查上游仓库；Windows 关闭（上游只发 dmg）
+// 3. 默认：Windows 走公司内网源（烧死在安装包里，员工零配置）；macOS 查上游仓库
+const COMPANY_UPDATE_URL = 'http://192.168.11.156/arca/latest.json'; // 信步内网更新源
 function readFanboxConfig() {
   try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.fanbox', 'config.json'), 'utf8')); } catch { return {}; }
 }
 function updateSource() {
-  const feedUrl = process.env.FANBOX_UPDATE_URL || readFanboxConfig().updateUrl || '';
+  const feedUrl = process.env.FANBOX_UPDATE_URL || readFanboxConfig().updateUrl
+    || (process.platform === 'win32' ? COMPANY_UPDATE_URL : '');
   if (feedUrl) return { type: 'feed', feedUrl };
   const repo = process.env.FANBOX_UPDATE_REPO || (process.platform === 'darwin' ? 'alchaincyf/fanbox' : '');
   return repo ? { type: 'github', repo } : null;
