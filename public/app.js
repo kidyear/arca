@@ -192,6 +192,8 @@ const state = {
   sort: localStorage.getItem('fb_sort') || 'name',
   showHidden: localStorage.getItem('fb_hidden') === '1',
   filter: '', selected: null, cursor: -1, cols: 1, visible: [],
+  multiSel: new Set(), // Ctrl/Shift 多选的路径集合(selected 是锚点);单选时为空
+  fileClip: null,      // 文件剪贴板 {op:'copy'|'cut', paths:[]}(Ctrl+C/X/V)
   favorites: [], recentOpened: [], recentMode: false, skillsMode: false,
   previewW: Number(localStorage.getItem('fb_preview_w')) || 480,
   previewH: Number(localStorage.getItem('fb_preview_h')) || 340,
@@ -439,7 +441,7 @@ function projBadge(e) {
 function gridItem(e, i) {
   const el = document.createElement('div');
   const chg = state.changed && state.changed.get(e.name);
-  el.className = 'item' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (state.selected === e.path ? ' selected' : '') + (chg ? ' changed' : '');
+  el.className = 'item' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (state.multiSel.has(e.path) || state.selected === e.path ? ' selected' : '') + (chg ? ' changed' : '');
   el.dataset.idx = i;
   el.dataset.path = e.path;
   if (chg) { el.dataset.changed = chg.count > 1 ? '改·' + chg.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chg.count * 0.12).toFixed(2)); if (chg.files.size) el.title = '刚变更：\n' + [...chg.files].join('\n'); }
@@ -450,7 +452,7 @@ function gridItem(e, i) {
 function listRow(e, i) {
   const el = document.createElement('div');
   const chgR = state.changed && state.changed.get(e.name);
-  el.className = 'row' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (state.selected === e.path ? ' selected' : '') + (chgR ? ' changed' : '');
+  el.className = 'row' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (state.multiSel.has(e.path) || state.selected === e.path ? ' selected' : '') + (chgR ? ' changed' : '');
   el.dataset.idx = i;
   el.dataset.path = e.path;
   if (chgR) { el.dataset.changed = chgR.count > 1 ? '改·' + chgR.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chgR.count * 0.12).toFixed(2)); if (chgR.files.size) el.title = '刚变更：\n' + [...chgR.files].join('\n'); }
@@ -468,16 +470,21 @@ function bindItem(el, e) {
   // 拖拽到终端：把路径作为上下文喂给 coding agent
   el.draggable = true;
   el.addEventListener('dragstart', (ev) => {
+    // 拖的是已选中项时整组一起拖(多选)；text/plain 保持单路径(喂终端/编辑器的旧约定不破)
+    const group = selPaths().includes(e.path) ? selPaths() : [e.path];
     ev.dataTransfer.setData('text/plain', e.path);
     ev.dataTransfer.setData('application/x-fanbox-path', e.path);
+    ev.dataTransfer.setData('application/x-fanbox-paths', JSON.stringify(group));
     // 拖图片进 md 编辑器：插入原文件路径引用。不带这条时浏览器默认抓的是卡片缩略图的
     // /api/thumb?w=160 链接，低清且写进文档发出去就裂
     if (e.kind === 'image') ev.dataTransfer.setData('text/html', `<img src="${escapeHtml(encodeURI(e.path))}" alt="${escapeHtml(e.name)}">`);
-    ev.dataTransfer.effectAllowed = 'copy';
+    ev.dataTransfer.effectAllowed = 'copyMove';
   });
   el.onclick = (ev) => {
     if (ev.target.closest('.fav-btn')) { ev.stopPropagation(); toggleFav(e); return; }
     state.cursor = Number(el.dataset.idx);
+    if (ev.ctrlKey || ev.metaKey) { toggleMultiSel(e); return; } // Ctrl+点击多选
+    if (ev.shiftKey) { rangeSelect(Number(el.dataset.idx)); return; } // Shift+点击范围选
     onItemClick(e);
   };
   el.ondblclick = (ev) => { if (ev.target.closest('.fav-btn')) return; onItemOpen(e); };
@@ -493,12 +500,43 @@ function makeDraggablePath(el, p) {
   });
 }
 // 只切换选中态的 class，绝不重建整个网格（重建会把所有缩略图重新解码 → 点击卡顿元凶）
-function applySelection(path) {
+function paintSelection() {
   const area = $('#file-area');
-  const prev = area.querySelector('.item.selected, .row.selected');
-  if (prev) prev.classList.remove('selected');
+  area.querySelectorAll('.item.selected, .row.selected').forEach((x) => x.classList.remove('selected'));
+  for (const p of selPaths()) {
+    const el = area.querySelector(`[data-path="${CSS.escape(p)}"]`);
+    if (el) el.classList.add('selected');
+  }
+}
+function applySelection(path) {
+  state.multiSel.clear();
   state.selected = path;
-  if (path) { const el = area.querySelector(`[data-path="${CSS.escape(path)}"]`); if (el) el.classList.add('selected'); }
+  paintSelection();
+}
+// 当前生效的选择集：多选优先，否则单选
+function selPaths() {
+  if (state.multiSel.size) return [...state.multiSel];
+  return state.selected ? [state.selected] : [];
+}
+function selEntries() {
+  const set = new Set(selPaths());
+  return state.visible.filter((e) => set.has(e.path));
+}
+// Ctrl/Cmd+点击：切换该项的选中（资源管理器习惯）
+function toggleMultiSel(e) {
+  if (!state.multiSel.size && state.selected && state.selected !== e.path) state.multiSel.add(state.selected);
+  if (state.multiSel.has(e.path)) state.multiSel.delete(e.path);
+  else state.multiSel.add(e.path);
+  state.selected = e.path; // 锚点跟到最后点击处
+  paintSelection();
+}
+// Shift+点击：从锚点到当前项的连续范围
+function rangeSelect(idx) {
+  const anchorIdx = state.visible.findIndex((x) => x.path === state.selected);
+  const from = anchorIdx >= 0 ? anchorIdx : idx;
+  const [a, b] = from <= idx ? [from, idx] : [idx, from];
+  state.multiSel = new Set(state.visible.slice(a, b + 1).map((x) => x.path));
+  paintSelection();
 }
 // 单击=选中(文件夹不再直接进入)，双击=进入/打开——跟随资源管理器/访达的肌肉记忆
 function onItemClick(e) {
@@ -1345,6 +1383,42 @@ async function doRename(e) {
   if (state.selected === e.path) state.selected = r.path;
   await refresh();
 }
+// ---------- 资源管理器化:组删除 / 文件剪贴板(Ctrl+C/X/V) ----------
+async function trashSelection() {
+  let items = selEntries();
+  if (!items.length && state.visible[state.cursor]) items = [state.visible[state.cursor]];
+  if (!items.length) return;
+  if (items.length === 1) return doTrash(items[0]);
+  const ok = await confirmDialog(`把选中的 ${items.length} 项移到废纸篓？可从废纸篓恢复。`);
+  if (!ok) return;
+  let fail = 0;
+  for (const it of items) { const r = await apiPost('/api/trash', { path: it.path }); if (r.error) fail++; }
+  toast(fail ? `完成，${fail} 项删除失败` : `已把 ${items.length} 项移到废纸篓`);
+  state.multiSel.clear();
+  await refresh();
+}
+function clipSet(op) {
+  const paths = selPaths();
+  if (!paths.length) return;
+  state.fileClip = { op, paths };
+  toast(`${op === 'cut' ? '已剪切' : '已复制'} ${paths.length} 项，到目标文件夹按 ${IS_MAC ? '⌘' : 'Ctrl+'}V 粘贴`);
+}
+async function clipPaste(dstDir) {
+  const clip = state.fileClip;
+  if (!clip || !clip.paths.length) return;
+  const dst = dstDir || state.cwd;
+  const norm = (p) => String(p).replace(/[\\/]+$/, '');
+  let okCount = 0, lastErr = '';
+  for (const src of clip.paths) {
+    if (clip.op === 'cut' && norm(dirOf(src)) === norm(dst)) continue; // 原地剪切粘贴=没动
+    const r = await apiPost(clip.op === 'cut' ? '/api/move' : '/api/copy-in', { src, dstDir: dst }).catch((err) => ({ ok: false, error: err.message }));
+    if (r.ok) okCount++; else lastErr = r.error || '失败';
+  }
+  if (okCount) { toast(`已${clip.op === 'cut' ? '移动' : '粘贴'} ${okCount} 项`); refresh(); }
+  if (lastErr) toast(lastErr, true);
+  if (clip.op === 'cut') state.fileClip = null; // 剪切是一次性的(资源管理器同款)
+}
+
 async function doTrash(e) {
   // 文件秒删（花叔的选择），但删整个文件夹给一次轻确认——误删项目目录代价高
   if (e.isDir) {
@@ -1593,6 +1667,20 @@ function closeContextMenu() { const m = $('#context-menu'); if (m) m.remove(); }
 function showContextMenu(ev, e) {
   ev.preventDefault();
   closeContextMenu();
+  // 右键落在多选集合里 → 组操作菜单;落在选区外 → 选区重置为该项(资源管理器习惯)
+  if (state.multiSel.size > 1 && state.multiSel.has(e.path)) {
+    const n = state.multiSel.size;
+    popupMenu(ev, [
+      { label: `复制 ${n} 项`, fn: () => clipSet('copy') },
+      { label: `剪切 ${n} 项`, fn: () => clipSet('cut') },
+      { sep: true },
+      { label: `移到废纸篓 ${n} 项`, danger: true, fn: () => trashSelection() },
+      { sep: true },
+      { label: '取消多选', fn: () => { state.multiSel.clear(); paintSelection(); } },
+    ]);
+    return;
+  }
+  if (state.multiSel.size && !state.multiSel.has(e.path)) applySelection(e.path);
   const items = [];
   if (e.isDir) items.push({ label: '打开', fn: () => navigate(e.path) });
   else items.push({ label: '预览', fn: () => { state.selected = e.path; openPreview(e); renderFiles(); } });
@@ -1605,6 +1693,10 @@ function showContextMenu(ev, e) {
   items.push({ label: '在编辑器打开', fn: () => openWith(e.path, 'editor') });
   items.push({ label: '在 Finder 显示', fn: () => openWith(e.path, 'reveal') });
   items.push({ label: '复制路径', fn: () => copyPath(e.path) });
+  items.push({ sep: true });
+  items.push({ label: '复制', fn: () => { applySelection(e.path); clipSet('copy'); } });
+  items.push({ label: '剪切', fn: () => { applySelection(e.path); clipSet('cut'); } });
+  if (state.fileClip && e.isDir) items.push({ label: `粘贴到「${e.name}」`, fn: () => clipPaste(e.path) });
   items.push({ sep: true });
   items.push({ label: isFav(e.path) ? '取消收藏' : '收藏', fn: () => toggleFav(e) });
   items.push({ label: '重命名…', fn: () => doRename(e) });
@@ -2088,54 +2180,89 @@ function bindEvents() {
   const blankMenu = (e) => {
     if (e.target.closest('.item') || e.target.closest('.row')) return; // 条目自身的菜单不抢
     e.preventDefault();
-    popupMenu(e, [
+    const blank = [
       { label: '新建文件夹…', fn: () => doCreate('dir') },
       { label: '新建文件…', fn: () => doCreate('file') },
-      { sep: true },
-      { label: 'AI 整理…', fn: () => organizeLaunch(state.cwd) },
-      { label: '磁盘占用透视', fn: () => diskPanel(state.cwd) },
-    ]);
+    ];
+    if (state.fileClip) blank.push({ label: `粘贴（${state.fileClip.paths.length} 项）`, fn: () => clipPaste() });
+    blank.push({ label: '全选', fn: () => { state.multiSel = new Set(state.visible.map((x) => x.path)); paintSelection(); } });
+    blank.push({ sep: true });
+    blank.push({ label: 'AI 整理…', fn: () => organizeLaunch(state.cwd) });
+    blank.push({ label: '磁盘占用透视', fn: () => diskPanel(state.cwd) });
+    popupMenu(e, blank);
   };
   $('#file-area').addEventListener('dblclick', blankMenu);
   $('#file-area').addEventListener('contextmenu', blankMenu);
   $('#content').addEventListener('contextmenu', (e) => { if (!e.target.closest('#file-area')) blankMenu(e); });
-  // 从系统(资源管理器/访达)拖文件进文件区 = 复制到当前目录(当文件管理器用)。
-  // 内部条目拖拽(x-fanbox-path)不在此列——那是喂终端/对话用的
+  // 文件区拖放(对标资源管理器)：
+  //  - 系统文件(资源管理器/访达/另一个灵匣窗口) → 复制进当前目录
+  //  - 应用内/跨窗口条目(x-fanbox-paths) → 移动(按住 Ctrl/⌘ = 复制)
+  //  - 悬停在文件夹卡片上 → 放进那个文件夹;否则放进当前目录
   const fileArea = $('#file-area');
-  const isExternalFileDrag = (e) => {
+  const dragKind = (e) => {
     const t = e.dataTransfer.types;
-    return t.includes('Files') && !t.includes('application/x-fanbox-path');
+    if (t.includes('application/x-fanbox-paths') || t.includes('application/x-fanbox-path')) return 'internal';
+    if (t.includes('Files')) return 'external';
+    return null;
+  };
+  const dropFolderEl = (e) => e.target.closest('.item.is-dir, .row.is-dir');
+  const clearDropHints = () => {
+    fileArea.classList.remove('drop-in');
+    fileArea.querySelectorAll('.drop-target').forEach((x) => x.classList.remove('drop-target'));
   };
   fileArea.addEventListener('dragover', (e) => {
-    if (!isExternalFileDrag(e) || state.skillsMode) return;
+    const kind = dragKind(e);
+    if (!kind || state.skillsMode || state.recentMode) return;
     e.preventDefault(); e.stopPropagation();
-    e.dataTransfer.dropEffect = 'copy';
-    fileArea.classList.add('drop-in');
+    e.dataTransfer.dropEffect = kind === 'external' || e.ctrlKey || e.metaKey ? 'copy' : 'move';
+    clearDropHints();
+    const folder = dropFolderEl(e);
+    if (folder) folder.classList.add('drop-target');
+    else fileArea.classList.add('drop-in');
   });
-  fileArea.addEventListener('dragleave', (e) => { if (!fileArea.contains(e.relatedTarget)) fileArea.classList.remove('drop-in'); });
+  fileArea.addEventListener('dragleave', (e) => { if (!fileArea.contains(e.relatedTarget)) clearDropHints(); });
   fileArea.addEventListener('drop', async (e) => {
-    if (!isExternalFileDrag(e) || state.skillsMode) return;
+    const kind = dragKind(e);
+    if (!kind || state.skillsMode || state.recentMode) return;
     e.preventDefault(); e.stopPropagation();
-    fileArea.classList.remove('drop-in');
+    const folder = dropFolderEl(e);
+    const dstDir = folder ? folder.dataset.path : state.cwd;
+    clearDropHints();
+    if (kind === 'internal') {
+      let paths = [];
+      try { paths = JSON.parse(e.dataTransfer.getData('application/x-fanbox-paths') || '[]'); } catch { /* */ }
+      if (!paths.length) { const p = e.dataTransfer.getData('application/x-fanbox-path'); if (p) paths = [p]; }
+      const copy = e.ctrlKey || e.metaKey; // 资源管理器习惯:默认移动,Ctrl=复制
+      const norm = (p) => String(p).replace(/[\\/]+$/, '');
+      let okCount = 0, lastErr = '';
+      for (const src of paths) {
+        if (norm(src) === norm(dstDir) || norm(dirOf(src)) === norm(dstDir)) continue; // 同目录/自身:不折腾
+        const r = await apiPost(copy ? '/api/copy-in' : '/api/move', { src, dstDir }).catch((err) => ({ ok: false, error: err.message }));
+        if (r.ok) okCount++; else lastErr = r.error || (copy ? '复制失败' : '移动失败');
+      }
+      if (okCount) { toast(`已${copy ? '复制' : '移动'} ${okCount} 个到 ${baseOf(dstDir) || dstDir}`); state.multiSel.clear(); refresh(); }
+      if (lastErr) toast(lastErr, true);
+      return;
+    }
     const files = [...(e.dataTransfer.files || [])];
     if (!files.length) return;
     let okCount = 0, lastErr = '';
     for (const f of files) {
       let src = window.fanboxDrop && window.fanboxDrop.pathForFile(f);
       if (src) {
-        const r = await apiPost('/api/copy-in', { src, dstDir: state.cwd }).catch((err) => ({ ok: false, error: err.message }));
+        const r = await apiPost('/api/copy-in', { src, dstDir }).catch((err) => ({ ok: false, error: err.message }));
         if (r.ok) okCount++; else lastErr = r.error || '复制失败';
       } else if (f.size <= 64 * 1024 * 1024) {
-        // 浏览器版拿不到源路径：直接把内容写进当前目录
+        // 浏览器版拿不到源路径：直接把内容写进目标目录
         try {
           const buf = await f.arrayBuffer();
-          const dest = state.cwd.replace(/[\\/]+$/, '') + state.sep + f.name;
+          const dest = dstDir.replace(/[\\/]+$/, '') + state.sep + f.name;
           const r = await apiPost('/api/write-binary', { path: dest, base64: abToBase64(buf) });
           if (r.ok) okCount++; else lastErr = r.error || '写入失败';
         } catch (err) { lastErr = err.message; }
       } else { lastErr = `${f.name} 超过 64MB，浏览器版无法导入，请用桌面版`; }
     }
-    if (okCount) { toast(`已复制 ${okCount} 个到当前文件夹`); refresh(); }
+    if (okCount) { toast(`已复制 ${okCount} 个到 ${baseOf(dstDir) || dstDir}`); refresh(); }
     if (lastErr) toast(lastErr, true);
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#context-menu')) closeContextMenu(); });
@@ -2184,13 +2311,22 @@ function bindEvents() {
     if ((e.metaKey || e.ctrlKey) && e.key === '[') { e.preventDefault(); goBack(); return; }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B') && !inInput) { e.preventDefault(); toggleSidebar(); return; }
     if (inInput) return;
+    // 多选态按 Esc 先清选择
+    if (e.key === 'Escape' && state.multiSel.size) { state.multiSel.clear(); paintSelection(); return; }
+    const mod = e.metaKey || e.ctrlKey;
+    // 文件剪贴板与全选(资源管理器习惯)
+    if (mod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); state.multiSel = new Set(state.visible.map((x) => x.path)); paintSelection(); return; }
+    if (mod && (e.key === 'c' || e.key === 'C') && selPaths().length) { e.preventDefault(); clipSet('copy'); return; }
+    if (mod && (e.key === 'x' || e.key === 'X') && selPaths().length) { e.preventDefault(); clipSet('cut'); return; }
+    if (mod && (e.key === 'v' || e.key === 'V') && state.fileClip) { e.preventDefault(); clipPaste(); return; }
     // 主区键盘导航
     if (e.key === 'ArrowDown') { e.preventDefault(); moveCursor(state.cols); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-state.cols); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); moveCursor(1); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); moveCursor(-1); }
     else if (e.key === 'Enter') { e.preventDefault(); cursorEnter(e.metaKey || e.ctrlKey); }
-    else if ((e.metaKey || e.ctrlKey) && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); const it = state.visible[state.cursor]; if (it) doTrash(it); }
+    else if (mod && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); trashSelection(); }
+    else if (e.key === 'Delete') { e.preventDefault(); trashSelection(); } // Windows:Delete=回收站
     else if (e.key === 'Backspace') { e.preventDefault(); goUp(); }
     else if (e.key === ' ') { e.preventDefault(); const it = state.visible[state.cursor]; if (it) toggleFav(it); }
     else if (e.key === 'F2') { e.preventDefault(); const it = state.visible[state.cursor]; if (it) doRename(it); }
@@ -3600,7 +3736,7 @@ const chat = {
     list.innerHTML = '';
     for (const c of this.chats) {
       const row = document.createElement('div');
-      row.className = 'chat-item' + (c.id === this.currentChat ? ' sel' : '');
+      row.className = 'chat-item' + (c.id === this.currentChat ? ' sel' : '') + (this.isBusy(c.id) ? ' running' : '');
       row.innerHTML = `<span class="ci-title">${escapeHtml(c.title || '未命名')}</span><span class="ci-sub">${escapeHtml(tilde(c.cwd || ''))}</span><button class="ci-del" title="删除会话">✕</button>`;
       row.onclick = () => this.openChat(c.id);
       row.querySelector('.ci-del').onclick = async (e) => {
@@ -3613,17 +3749,24 @@ const chat = {
     }
   },
   // 打开旧会话：回显引擎侧的历史消息，后续发言自动续聊（resume）
+  // 多会话可并行：切换不受别的会话运行影响，发送/停止按钮只反映「当前这个会话」的状态
   async openChat(id) {
-    if (this.busy) { toast('等当前回合结束再切换会话', true); return; }
     this.currentChat = id;
     this.renderChatList();
+    this.updateComposer();
     tpl.clear();
     const box = $('#chat-msgs');
     box.innerHTML = '';
     let r;
     try { r = await api(`/api/ai/chat-history?id=${encodeURIComponent(id)}`); } catch { r = { messages: [] }; }
+    if (this.isBusy(id)) {
+      const note = document.createElement('div');
+      note.className = 'chat-empty';
+      note.innerHTML = '<p>⏳ 这个会话正在后台运行，完成后重新打开可看到本轮结果。</p>';
+      box.appendChild(note);
+    }
     if (!r.messages.length) {
-      box.innerHTML = '<div class="chat-empty"><p>已接上这个会话的上下文，直接继续说就行。</p></div>';
+      if (!this.isBusy(id)) box.innerHTML = '<div class="chat-empty"><p>已接上这个会话的上下文，直接继续说就行。</p></div>';
       return;
     }
     for (const m of r.messages) {
@@ -3647,24 +3790,29 @@ const chat = {
   newChat() {
     this.currentChat = null;
     this.renderChatList();
+    this.updateComposer();
     $('#chat-msgs').innerHTML = '<div class="chat-empty"><p>新对话。这次对话会绑定当前浏览的目录：' + escapeHtml(tilde(state.cwd || '~')) + '</p></div>';
     tpl.showPicker();
     $('#chat-input').focus();
   },
-  setBusy(b) {
-    this.busy = b;
+  // 按会话记账的运行状态：每个会话各自有发送/停止态，多会话可并行、各停各的
+  busyChats: new Set(),
+  isBusy(id) { return this.busyChats.has(id || '__new__'); },
+  updateComposer() {
+    const b = this.isBusy(this.currentChat);
     $('#chat-send').disabled = b;
     $('#chat-stop').classList.toggle('hidden', !b);
   },
   // forcedText：跳过输入框直接发这段文字（任务模板组装的提示词走这里）
   // displayText：用户气泡里显示的人话摘要（不给非技术用户看大段提示词）
   async send(forcedText, displayText) {
-    if (this.busy) return;
+    if (this.isBusy(this.currentChat)) return; // 当前会话有回合在跑；别的会话不受影响
     const input = $('#chat-input');
     const text = (forcedText !== undefined ? forcedText : input.value).trim();
     if (!text && !this.attachments.length) return;
     tpl.clear(); // 发送时收起模板区
     const payload = { chatId: this.currentChat, text, title: (displayText || text).slice(0, 40), attachments: this.attachments.slice(), cwd: state.cwd };
+    let busyKey = this.currentChat || '__new__'; // 新会话先用占位 key，拿到正式 id 后置换
     // 用户气泡（附件名一并显示）
     const u = this.msgEl('user');
     u.textContent = displayText || text;
@@ -3677,7 +3825,8 @@ const chat = {
     if (forcedText === undefined) input.value = '';
     this.attachments = [];
     this.renderChips();
-    this.setBusy(true);
+    this.busyChats.add(busyKey);
+    this.updateComposer();
 
     // 助手回合容器：text/工具状态/审批卡片按到达顺序追加；文本按段落用 marked 渲染
     const a = this.msgEl('assistant');
@@ -3692,7 +3841,13 @@ const chat = {
     const endSegment = () => { if (renderTimer) { clearTimeout(renderTimer); renderMd(); } mdBuf = ''; mdDiv = null; };
     const toolLines = [];
     const onEvent = (ev) => {
-      if (ev.type === 'chat') { this.currentChat = ev.id; this.runningChat = ev.id; return; }
+      if (ev.type === 'chat') {
+        // 占位 key 换成正式会话 id；若用户还停在「新对话」视图则跟进到这个会话
+        if (busyKey !== ev.id) { this.busyChats.delete(busyKey); busyKey = ev.id; this.busyChats.add(busyKey); }
+        if (!payload.chatId && this.currentChat === null) { this.currentChat = ev.id; this.renderChatList(); }
+        this.updateComposer();
+        return;
+      }
       if (ev.type === 'meta') { $('#chat-model').textContent = `${ev.provider} · ${ev.model}`; return; }
       if (ev.type === 'done') {
         if (ev.cost > 0) {
@@ -3786,13 +3941,14 @@ const chat = {
     }
     endSegment();
     if (!a.childNodes.length) a.remove(); // 全程没产出（比如配置错误已在 error 行展示过）就别留空气泡
-    this.runningChat = null;
-    this.setBusy(false);
+    this.busyChats.delete(busyKey);
+    this.updateComposer();
     this.loadChats(); // 新会话进列表 / 时间戳置顶
   },
   stop() {
-    // 停的是「正在跑的会话」——流式期间用户可能已切到别的会话，不能用 currentChat
-    fetch('/api/ai/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: this.runningChat || this.currentChat }) }).catch(() => {});
+    // 只停「当前正在看的会话」——别的会话各跑各的，互不干涉
+    if (!this.isBusy(this.currentChat)) return;
+    fetch('/api/ai/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: this.currentChat }) }).catch(() => {});
   },
   init() {
     $('#btn-chat').onclick = () => this.toggle();

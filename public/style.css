@@ -1234,3 +1234,9 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 
 /* 拖文件进文件区(复制到当前目录)的落点高亮 */
 #file-area.drop-in { outline: 2px dashed var(--accent); outline-offset: -6px; background: var(--accent-soft); }
+
+/* 正在后台运行的会话:列表项绿点呼吸 */
+.chat-item.running .ci-title::before { content: '●'; color: var(--green, #3C7D4F); margin-right: 5px; font-size: 9px; vertical-align: 1px; animation: tabpulse 1.4s ease-in-out infinite; }
+
+/* 拖动悬停在文件夹卡片上:即将放入该文件夹 */
+.item.drop-target, .row.drop-target { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
