@@ -80,7 +80,7 @@ app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) {
     try { app.dock.setIcon(nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icon.png'))); } catch { /* */ }
   }
-  app.setName('灵匣 LingXia');
+  app.setName('灵匣 Arca');
   buildMenu();
   createWindow();
   startShotWatch();
@@ -152,7 +152,7 @@ function updateSource() {
 }
 async function fetchLatestRelease(src) {
   if (src.type === 'feed') {
-    const res = await net.fetch(src.feedUrl, { headers: { 'User-Agent': 'lingxia-app' }, cache: 'no-store' });
+    const res = await net.fetch(src.feedUrl, { headers: { 'User-Agent': 'arca-app' }, cache: 'no-store' });
     if (!res.ok) return null;
     const j = await res.json();
     return j.version ? { tag: String(j.version), url: String(j.url || src.feedUrl) } : null;
@@ -162,14 +162,14 @@ async function fetchLatestRelease(src) {
   // 失败就退回抓 releases/latest 网页重定向——重定向后的 URL 自带 tag，且不占 API 配额
   try {
     const res = await net.fetch(`https://api.github.com/repos/${src.repo}/releases/latest`, {
-      headers: { 'User-Agent': 'lingxia-app', Accept: 'application/vnd.github+json' },
+      headers: { 'User-Agent': 'arca-app', Accept: 'application/vnd.github+json' },
     });
     if (res.ok) {
       const rel = await res.json();
       if (rel.tag_name) return { tag: rel.tag_name, url: rel.html_url || relPage };
     }
   } catch { /* 走兜底 */ }
-  const res = await net.fetch(relPage, { headers: { 'User-Agent': 'lingxia-app' } });
+  const res = await net.fetch(relPage, { headers: { 'User-Agent': 'arca-app' } });
   const m = String(res.url || '').match(/\/releases\/tag\/([^/?#]+)/);
   if (m) return { tag: decodeURIComponent(m[1]), url: res.url };
   return null;
@@ -249,12 +249,12 @@ function buildMenu() {
   const isMac = process.platform === 'darwin';
   const template = [
     ...(isMac ? [{ label: '灵匣', submenu: [
-      { role: 'about', label: M('关于 灵匣', 'About LingXia') },
+      { role: 'about', label: M('关于 灵匣', 'About Arca') },
       { label: M('检查更新…', 'Check for Updates…'), click: () => checkUpdate({ manual: true }) },
       { type: 'separator' },
-      { role: 'hide', label: M('隐藏 灵匣', 'Hide LingXia') }, { role: 'hideOthers', label: M('隐藏其他', 'Hide Others') }, { role: 'unhide', label: M('全部显示', 'Show All') },
+      { role: 'hide', label: M('隐藏 灵匣', 'Hide Arca') }, { role: 'hideOthers', label: M('隐藏其他', 'Hide Others') }, { role: 'unhide', label: M('全部显示', 'Show All') },
       { type: 'separator' },
-      { role: 'quit', label: M('退出 灵匣', 'Quit LingXia') },
+      { role: 'quit', label: M('退出 灵匣', 'Quit Arca') },
     ] }] : []),
     { label: M('文件', 'File'), submenu: [
       ...(isMac ? [] : [{ label: M('检查更新…', 'Check for Updates…'), click: () => checkUpdate({ manual: true }) }, { type: 'separator' }]),

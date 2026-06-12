@@ -1,7 +1,7 @@
 {
-  "name": "lingxia",
+  "name": "arca",
   "version": "1.0.0",
-  "description": "灵匣 LingXia — 文件夹操作 × AI Agent 的结合体。匣中有灵:文件信手可得,活儿交给 AI 办。信步 SEAVO 公司版,基于开源 FanBox。",
+  "description": "灵匣 Arca — 文件夹操作 × AI Agent 的结合体。匣中有灵:文件信手可得,活儿交给 AI 办。信步 SEAVO 公司版,基于开源 FanBox。",
   "bin": {
     "fanbox": "server.js"
   },
@@ -20,8 +20,8 @@
     "build:xlsx": "esbuild src-vendor/xlsx-entry.js --bundle --format=iife --minify --outfile=public/vendor/xlsx/xlsx.js"
   },
   "build": {
-    "appId": "com.seavo.lingxia",
-    "productName": "灵匣 LingXia",
+    "appId": "com.seavo.arca",
+    "productName": "灵匣 Arca",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -48,7 +48,7 @@
       ]
     },
     "dmg": {
-      "title": "灵匣 LingXia",
+      "title": "灵匣 Arca",
       "writeUpdateInfo": false
     },
     "win": {
@@ -59,13 +59,13 @@
           "arch": "x64"
         }
       ],
-      "artifactName": "LingXia-Setup-${version}.exe"
+      "artifactName": "Arca-Setup-${version}.exe"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "灵匣 LingXia",
+      "shortcutName": "灵匣 Arca",
       "writeUpdateInfo": false
     }
   },
