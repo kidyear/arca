@@ -39,7 +39,89 @@ const PROVIDERS = {
 };
 
 // 无需审批直接放行的只读/低危工具；其余（Write/Edit/Bash/…）走前端「允许/拒绝」卡片
-const AUTO_ALLOW = new Set(['Read', 'Glob', 'Grep', 'TodoWrite', 'Task', 'WebFetch', 'WebSearch', 'NotebookRead', 'ToolSearch', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet']);
+const AUTO_ALLOW = new Set(['Read', 'Glob', 'Grep', 'TodoWrite', 'Task', 'WebFetch', 'WebSearch', 'NotebookRead', 'ToolSearch', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
+  // Word 审阅只读工具（读正文/读已有批注修订）
+  'mcp__docx__read', 'mcp__docx__review_status']);
+
+// ---------- Word 审阅工具（@eigenpal/docx-editor-agents）----------
+// AI 像人类审阅者一样工作：批注 + 修订（tracked changes），不直接篡改正文。
+// 员工在 Word / 灵匣预览里看到的就是标准审阅标记，可逐条接受/拒绝。
+let _docxDeps = null;
+async function getDocxDeps() {
+  if (!_docxDeps) {
+    const sdk = await import('@anthropic-ai/claude-agent-sdk');
+    const { DocxReviewer } = require('@eigenpal/docx-editor-agents');
+    const { z } = require('zod');
+    _docxDeps = { tool: sdk.tool, createSdkMcpServer: sdk.createSdkMcpServer, DocxReviewer, z };
+  }
+  return _docxDeps;
+}
+async function buildDocxServer(cwd) {
+  const { tool, createSdkMcpServer, DocxReviewer, z } = await getDocxDeps();
+  const AUTHOR = '灵匣 AI';
+  const load = async (p) => {
+    const file = path.resolve(cwd, String(p || ''));
+    if (!/\.docx$/i.test(file)) throw new Error('只支持 .docx（旧版 .doc 请先另存为 .docx）');
+    const buf = await fsp.readFile(file);
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    return { file, reviewer: await DocxReviewer.fromBuffer(ab, AUTHOR) };
+  };
+  const saveBack = async (file, reviewer) => {
+    const out = Buffer.from(await reviewer.toBuffer());
+    const tmp = `${file}.tmp-${process.pid}`;
+    await fsp.writeFile(tmp, out);
+    await fsp.rename(tmp, file);
+  };
+  const text = (s) => ({ content: [{ type: 'text', text: String(s) }] });
+  const guard = (fn) => async (args) => { try { return await fn(args); } catch (e) { return text(`操作失败：${e.message}`); } };
+  return createSdkMcpServer({
+    name: 'docx', version: '1.0.0',
+    tools: [
+      tool('read', '读取 Word 文档(.docx)正文，返回带段落编号的纯文本（[0] [1] …），后续批注/修订都按这个编号定位',
+        { path: z.string().describe('docx 文件路径（可相对当前目录）') },
+        guard(async (a) => text((await load(a.path)).reviewer.getContentAsText()))),
+      tool('review_status', '读取 Word 文档(.docx)里已有的批注和修订记录',
+        { path: z.string() },
+        guard(async (a) => {
+          const { reviewer } = await load(a.path);
+          return text(JSON.stringify({ comments: reviewer.getComments(), changes: reviewer.getChanges() }, null, 1));
+        })),
+      tool('add_comment', '给 Word 文档(.docx)的指定段落加一条审阅批注（不改正文）。先用 read 拿段落编号',
+        { path: z.string(), paragraphIndex: z.number().describe('read 输出里的段落编号'), text: z.string().describe('批注内容'), search: z.string().optional().describe('可选：段落内要锚定的原文短语') },
+        guard(async (a) => {
+          const { file, reviewer } = await load(a.path);
+          reviewer.addComment({ paragraphIndex: a.paragraphIndex, text: a.text, search: a.search });
+          await saveBack(file, reviewer);
+          return text('批注已添加');
+        })),
+      tool('replace', '以「修订」方式改 Word 文档(.docx)的文字——Word 里显示为可接受/拒绝的 tracked change。replaceWith 留空 = 删除该短语',
+        { path: z.string(), paragraphIndex: z.number(), search: z.string().describe('段落内要改的原文短语'), replaceWith: z.string().describe('改成什么；空字符串表示删除') },
+        guard(async (a) => {
+          const { file, reviewer } = await load(a.path);
+          if (a.replaceWith === '') reviewer.proposeDeletion({ paragraphIndex: a.paragraphIndex, search: a.search });
+          else reviewer.replace({ paragraphIndex: a.paragraphIndex, search: a.search, replaceWith: a.replaceWith });
+          await saveBack(file, reviewer);
+          return text('修订已添加（Word 审阅标记，可接受/拒绝）');
+        })),
+      tool('review', '一次性提交整组审阅（多条批注+多处修订），只弹一次确认。整篇审完后优先用这个，别逐条调用',
+        {
+          path: z.string(),
+          comments: z.array(z.object({ paragraphIndex: z.number(), text: z.string(), search: z.string().optional() })).optional().describe('批注列表'),
+          replacements: z.array(z.object({ paragraphIndex: z.number(), search: z.string(), replaceWith: z.string() })).optional().describe('修订列表'),
+        },
+        guard(async (a) => {
+          const { file, reviewer } = await load(a.path);
+          const r = reviewer.applyReview({ comments: a.comments || [], proposals: a.replacements || [] });
+          const okCount = r.commentsAdded + r.proposalsAdded;
+          const errs = (r.errors || []).map((e) => `${e.operation || ''}「${e.search || ''}」: ${e.error || e.message || ''}`);
+          // 全军覆没就不落盘——库在批注锚定失败时可能留下悬空标记
+          if (!okCount) return text(`没有任何操作成功，未改动文件。请先用 read 核对段落编号和原文短语。失败详情：${errs.join('；')}`);
+          await saveBack(file, reviewer);
+          return text(`已写入：批注 ${r.commentsAdded} 条、修订 ${r.proposalsAdded} 处` + (errs.length ? `；失败 ${errs.length} 项（未写入）：${errs.join('；')}` : ''));
+        })),
+    ],
+  });
+}
 
 // v1（自研引擎）时代存下的 OpenAI 兼容 baseUrl，对新引擎是错的——读到就当没存，回落到预设
 const LEGACY_BASEURLS = new Set([
@@ -296,12 +378,14 @@ module.exports = function createAI(ctx) {
           maxTurns: 100,
           abortController: ac,
           env,
+          mcpServers: { docx: await buildDocxServer(chat.cwd) },
           systemPrompt: {
             type: 'preset', preset: 'claude_code',
             append: [
               '你在「灵匣 LingXia」的对话面板里工作，用户可能不熟悉技术——回答说人话、保持简洁、始终用中文。',
               '产出尽量落成文件（写到当前工作目录），并在回答里给出文件路径。',
               '删除、覆盖、批量改动前先用一两句话说明影响。',
+              '审阅/检查/修改 Word 文档(.docx)时用 docx 系列工具（read 读段落编号→review 一次性提交批注+修订），像人类审阅者一样打标记，不要直接改写文件正文。',
             ].join('\n'),
           },
           canUseTool: async (toolName, input, { signal }) => {
