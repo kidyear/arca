@@ -1240,3 +1240,14 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 
 /* 拖动悬停在文件夹卡片上:即将放入该文件夹 */
 .item.drop-target, .row.drop-target { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+
+/* Word/Excel 预览:外层不滚,滚动只发生在编辑器容器里——保存条和编辑工具栏都固定可见 */
+.preview-body:has(.docx-host), .preview-body:has(.xlsx-host) { display: flex; flex-direction: column; overflow: hidden; }
+.docx-host [class*="z-50"] { position: sticky; top: 0; z-index: 60; background: #fff; box-shadow: 0 1px 0 rgba(0,0,0,0.08); }
+
+/* ---- Windows 性能调优:低端核显上滤镜/纹理是重绘大头,点击选中更跟手 ---- */
+.grid .item, .list .row { contain: layout style; }
+.plat-win32 body { background-image: none !important; }                      /* 纸纹理(全窗重绘成本) */
+.plat-win32 .grid .item .icon .svg-icon { filter: none; }                    /* 图标投影滤镜 */
+.plat-win32 .grid .item:hover .svg-icon { transform: none; }                 /* hover 位移引发的合成 */
+.plat-win32 .topbar-actions svg, .plat-win32 .term-actions button svg, .plat-win32 .preview-actions svg { filter: none; }

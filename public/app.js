@@ -540,8 +540,9 @@ function rangeSelect(idx) {
 }
 // 单击=选中(文件夹不再直接进入)，双击=进入/打开——跟随资源管理器/访达的肌肉记忆
 function onItemClick(e) {
+  const samePreviewed = !e.isDir && state.selected === e.path && !state.multiSel.size && !$('#preview').classList.contains('hidden');
   applySelection(e.path);
-  if (!e.isDir) { openPreview(e); recordRecent(e.path); }
+  if (!e.isDir && !samePreviewed) { openPreview(e); recordRecent(e.path); } // 重复点同一文件不重载预览
 }
 function onItemOpen(e) { if (e.isDir) navigate(e.path); else openWith(e.path, 'default'); }
 

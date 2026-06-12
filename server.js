@@ -1971,7 +1971,7 @@ function originAllowed(req) {
 }
 
 // ---------- AI 对话面板（/api/ai/*）：多家模型接入 + 文件工具 agent 循环，见 ai.js ----------
-const ai = require('./ai.js')({ HOME, PLATFORM, readConfig, updateConfig, resolvePath, searchFiles, grepFiles });
+const ai = require('./ai.js')({ HOME, PLATFORM, PORT, readConfig, updateConfig, resolvePath, searchFiles, grepFiles });
 
 
 const server = http.createServer(async (req, res) => {

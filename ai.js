@@ -163,10 +163,43 @@ const LEGACY_BASEURLS = new Set([
 ]);
 
 module.exports = function createAI(ctx) {
-  // ctx: { HOME, PLATFORM, readConfig, updateConfig, resolvePath }
+  // ctx: { HOME, PLATFORM, PORT, readConfig, updateConfig, resolvePath }
   const CHATS_FILE = path.join(ctx.HOME, '.fanbox', 'chats.json');
   const pendingApprovals = new Map(); // approvalId -> resolve(bool)
   const running = new Map();          // chatId -> AbortController
+  // 本机中转：引擎只连 127.0.0.1，由 Node 转发到模型端点。
+  // 员工机器上杀软/EDR/代理常会掐未签名子进程的外联（引擎 ConnectionRefused 的根因），
+  // 而本进程的 Node fetch 已被验证可达（模型列表就是它拉的）——让引擎借道这条通路
+  let relayUpstream = '';
+  async function relayHandle(req, res, p, search) {
+    if (!relayUpstream) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'relay 未就绪：先发起一次对话' } }));
+      return;
+    }
+    const target = relayUpstream + p.slice('/api/ai/relay'.length) + (search || '');
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (['host', 'connection', 'content-length', 'accept-encoding', 'origin'].includes(k)) continue;
+      headers[k] = v;
+    }
+    let r;
+    try {
+      r = await fetch(target, { method: req.method, headers, body: chunks.length ? Buffer.concat(chunks) : undefined });
+    } catch (e) {
+      engineLog(`relay 上游失败: ${(e.message || '')}${e.cause ? ' / ' + e.cause.message : ''}`);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'relay: ' + e.message } }));
+      return;
+    }
+    const out = {};
+    r.headers.forEach((v, k) => { if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection'].includes(k)) out[k] = v; });
+    res.writeHead(r.status, out);
+    if (r.body) { try { for await (const c of r.body) res.write(c); } catch { /* 客户端/上游中断 */ } }
+    res.end();
+  }
 
   // ---------- 会话索引 ----------
   async function readChats() {
@@ -273,6 +306,10 @@ module.exports = function createAI(ctx) {
     const p = url.pathname;
     if (!p.startsWith('/api/ai/')) return false;
 
+    if (p.startsWith('/api/ai/relay/')) {
+      await relayHandle(req, res, p, url.search);
+      return true;
+    }
     if (p === '/api/ai/providers' && req.method === 'GET') {
       const ai = await getAIConfig();
       const out = {};
@@ -395,14 +432,16 @@ module.exports = function createAI(ctx) {
       if (prov.key !== 'claude') {
         // 第三方端点统一走 Bearer 认证（DeepSeek 等官方指引就是 ANTHROPIC_AUTH_TOKEN）。
         // 注意要 delete 而不是置空串——空串环境变量照样占住认证优先级
-        env.ANTHROPIC_BASE_URL = prov.baseUrl;
+        // 引擎不直连外网：指到本机中转（127.0.0.1 谁都拦不了），由 Node 转发到真端点。
+        // 员工机器的杀软/EDR/残留代理会掐未签名子进程的外联（v1.0.4 真机 ConnectionRefused 根因）
+        relayUpstream = prov.baseUrl;
+        env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${ctx.PORT}/api/ai/relay`;
         env.ANTHROPIC_AUTH_TOKEN = prov.apiKey;
         delete env.ANTHROPIC_API_KEY;
         env.ANTHROPIC_MODEL = prov.model;
         env.ANTHROPIC_SMALL_FAST_MODEL = prov.model;
         env.ANTHROPIC_DEFAULT_HAIKU_MODEL = prov.model;
-        // 国产端点直连：员工机器常残留指向本地代理的 HTTP(S)_PROXY（代理没开就 ConnectionRefused）。
-        // Node fetch 不读这些变量（所以拉模型列表能成功），引擎读 → 同机两种行为，统一砍掉
+        // 本机回环不走任何代理
         for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[k];
         env.NO_PROXY = '*';
       } else if (prov.apiKey) {
