@@ -1,6 +1,6 @@
 {
   "name": "lingxia",
-  "version": "1.7.2",
+  "version": "1.0.0",
   "description": "灵匣 LingXia — 文件夹操作 × AI Agent 的结合体。匣中有灵:文件信手可得,活儿交给 AI 办。信步 SEAVO 公司版,基于开源 FanBox。",
   "bin": {
     "fanbox": "server.js"
