@@ -1231,3 +1231,6 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 [data-theme="seavo"] .seavo-mark { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--border); }
 .seavo-mark img { height: 12px; width: auto; opacity: .8; }
 .seavo-mark span { font-family: var(--font-display); font-size: 10px; letter-spacing: .08em; color: var(--text-faint); }
+
+/* 拖文件进文件区(复制到当前目录)的落点高亮 */
+#file-area.drop-in { outline: 2px dashed var(--accent); outline-offset: -6px; background: var(--accent-soft); }

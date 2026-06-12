@@ -51,6 +51,15 @@ function engineBinaryPath() {
   return null;
 }
 
+// 引擎诊断日志：~/.fanbox/engine.log（远程排障用——员工把这个文件发回来即可）
+const ENGINE_LOG = path.join(os.homedir(), '.fanbox', 'engine.log');
+function engineLog(line) {
+  try {
+    try { if (fs.statSync(ENGINE_LOG).size > 1024 * 1024) fs.renameSync(ENGINE_LOG, ENGINE_LOG + '.1'); } catch { /* */ }
+    fs.appendFileSync(ENGINE_LOG, `[${new Date().toISOString()}] ${line}\n`);
+  } catch { /* 日志失败不影响主流程 */ }
+}
+
 // ---------- Provider 预设（全部 Anthropic 兼容端点）----------
 const PROVIDERS = {
   claude:   { label: 'Claude (官方)', baseUrl: '', models: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'], keyUrl: 'https://platform.claude.com/settings/keys', note: '不填 key 时用本机已登录的 Claude Code 账号（订阅额度）' },
@@ -392,6 +401,10 @@ module.exports = function createAI(ctx) {
         env.ANTHROPIC_MODEL = prov.model;
         env.ANTHROPIC_SMALL_FAST_MODEL = prov.model;
         env.ANTHROPIC_DEFAULT_HAIKU_MODEL = prov.model;
+        // 国产端点直连：员工机器常残留指向本地代理的 HTTP(S)_PROXY（代理没开就 ConnectionRefused）。
+        // Node fetch 不读这些变量（所以拉模型列表能成功），引擎读 → 同机两种行为，统一砍掉
+        for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[k];
+        env.NO_PROXY = '*';
       } else if (prov.apiKey) {
         env.ANTHROPIC_API_KEY = prov.apiKey;
         delete env.ANTHROPIC_AUTH_TOKEN;
@@ -399,6 +412,8 @@ module.exports = function createAI(ctx) {
 
       const prompt = [text, ...(attachments || []).map((a) => `（附件，请按需读取：${a}）`)].filter(Boolean).join('\n');
       const query = await getQuery();
+      const enginePath = engineBinaryPath();
+      engineLog(`chat=${chat.id} provider=${prov.key} model=${prov.model} base=${prov.baseUrl || '(官方)'} engine=${enginePath || '(SDK自行解析)'}`);
       const ac = new AbortController();
       runKey = chat.id;
       running.set(runKey, ac);
@@ -415,7 +430,8 @@ module.exports = function createAI(ctx) {
           maxTurns: 100,
           abortController: ac,
           env,
-          pathToClaudeCodeExecutable: engineBinaryPath() || undefined,
+          pathToClaudeCodeExecutable: enginePath || undefined,
+          stderr: (data) => { const s = String(data).trim(); if (s) engineLog(`stderr: ${s.slice(0, 500)}`); },
           mcpServers: { docx: await buildDocxServer(chat.cwd) },
           systemPrompt: {
             type: 'preset', preset: 'claude_code',
@@ -466,12 +482,16 @@ module.exports = function createAI(ctx) {
           if (!msg.parent_tool_use_id) send({ type: 'tool_done' });
         } else if (msg.type === 'result') {
           await updateChats((list) => { const c = list.find((x) => x.id === chat.id); if (c) c.ts = Date.now(); return list; });
-          if (msg.is_error && msg.subtype !== 'success') send({ type: 'error', message: String(msg.result || msg.subtype).slice(0, 500) });
+          if (msg.is_error && msg.subtype !== 'success') {
+            engineLog(`chat=${chat.id} 引擎报错: ${String(msg.result || msg.subtype).slice(0, 300)}`);
+            send({ type: 'error', message: String(msg.result || msg.subtype).slice(0, 500) });
+          }
           send({ type: 'done', cost: msg.total_cost_usd, turns: msg.num_turns });
         }
       }
     } catch (e) {
       const aborted = e.name === 'AbortError' || /abort/i.test(e.message || '');
+      if (!aborted) engineLog(`chat=${runKey} 异常: ${(e.message || '').slice(0, 300)}`);
       send({ type: 'error', message: aborted ? '已停止' : e.message });
       send({ type: 'done' });
     } finally {

@@ -500,11 +500,10 @@ function applySelection(path) {
   state.selected = path;
   if (path) { const el = area.querySelector(`[data-path="${CSS.escape(path)}"]`); if (el) el.classList.add('selected'); }
 }
+// 单击=选中(文件夹不再直接进入)，双击=进入/打开——跟随资源管理器/访达的肌肉记忆
 function onItemClick(e) {
-  if (e.isDir) { state.selected = e.path; navigate(e.path); return; }
   applySelection(e.path);
-  openPreview(e);
-  recordRecent(e.path);
+  if (!e.isDir) { openPreview(e); recordRecent(e.path); }
 }
 function onItemOpen(e) { if (e.isDir) navigate(e.path); else openWith(e.path, 'default'); }
 
@@ -2100,6 +2099,45 @@ function bindEvents() {
   $('#file-area').addEventListener('dblclick', blankMenu);
   $('#file-area').addEventListener('contextmenu', blankMenu);
   $('#content').addEventListener('contextmenu', (e) => { if (!e.target.closest('#file-area')) blankMenu(e); });
+  // 从系统(资源管理器/访达)拖文件进文件区 = 复制到当前目录(当文件管理器用)。
+  // 内部条目拖拽(x-fanbox-path)不在此列——那是喂终端/对话用的
+  const fileArea = $('#file-area');
+  const isExternalFileDrag = (e) => {
+    const t = e.dataTransfer.types;
+    return t.includes('Files') && !t.includes('application/x-fanbox-path');
+  };
+  fileArea.addEventListener('dragover', (e) => {
+    if (!isExternalFileDrag(e) || state.skillsMode) return;
+    e.preventDefault(); e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    fileArea.classList.add('drop-in');
+  });
+  fileArea.addEventListener('dragleave', (e) => { if (!fileArea.contains(e.relatedTarget)) fileArea.classList.remove('drop-in'); });
+  fileArea.addEventListener('drop', async (e) => {
+    if (!isExternalFileDrag(e) || state.skillsMode) return;
+    e.preventDefault(); e.stopPropagation();
+    fileArea.classList.remove('drop-in');
+    const files = [...(e.dataTransfer.files || [])];
+    if (!files.length) return;
+    let okCount = 0, lastErr = '';
+    for (const f of files) {
+      let src = window.fanboxDrop && window.fanboxDrop.pathForFile(f);
+      if (src) {
+        const r = await apiPost('/api/copy-in', { src, dstDir: state.cwd }).catch((err) => ({ ok: false, error: err.message }));
+        if (r.ok) okCount++; else lastErr = r.error || '复制失败';
+      } else if (f.size <= 64 * 1024 * 1024) {
+        // 浏览器版拿不到源路径：直接把内容写进当前目录
+        try {
+          const buf = await f.arrayBuffer();
+          const dest = state.cwd.replace(/[\\/]+$/, '') + state.sep + f.name;
+          const r = await apiPost('/api/write-binary', { path: dest, base64: abToBase64(buf) });
+          if (r.ok) okCount++; else lastErr = r.error || '写入失败';
+        } catch (err) { lastErr = err.message; }
+      } else { lastErr = `${f.name} 超过 64MB，浏览器版无法导入，请用桌面版`; }
+    }
+    if (okCount) { toast(`已复制 ${okCount} 个到当前文件夹`); refresh(); }
+    if (lastErr) toast(lastErr, true);
+  });
   document.addEventListener('click', (e) => { if (!e.target.closest('#context-menu')) closeContextMenu(); });
   window.addEventListener('blur', closeContextMenu);
   $('#scope-toggle').onclick = () => cmdk.toggleScope();
@@ -3654,7 +3692,7 @@ const chat = {
     const endSegment = () => { if (renderTimer) { clearTimeout(renderTimer); renderMd(); } mdBuf = ''; mdDiv = null; };
     const toolLines = [];
     const onEvent = (ev) => {
-      if (ev.type === 'chat') { this.currentChat = ev.id; return; }
+      if (ev.type === 'chat') { this.currentChat = ev.id; this.runningChat = ev.id; return; }
       if (ev.type === 'meta') { $('#chat-model').textContent = `${ev.provider} · ${ev.model}`; return; }
       if (ev.type === 'done') {
         if (ev.cost > 0) {
@@ -3748,11 +3786,13 @@ const chat = {
     }
     endSegment();
     if (!a.childNodes.length) a.remove(); // 全程没产出（比如配置错误已在 error 行展示过）就别留空气泡
+    this.runningChat = null;
     this.setBusy(false);
     this.loadChats(); // 新会话进列表 / 时间戳置顶
   },
   stop() {
-    fetch('/api/ai/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: this.currentChat }) }).catch(() => {});
+    // 停的是「正在跑的会话」——流式期间用户可能已切到别的会话，不能用 currentChat
+    fetch('/api/ai/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: this.runningChat || this.currentChat }) }).catch(() => {});
   },
   init() {
     $('#btn-chat').onclick = () => this.toggle();

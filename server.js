@@ -924,6 +924,25 @@ async function archiveList(p) {
   return { ok: true, entries: entries.slice(0, MAX), truncated };
 }
 
+// 复制文件/文件夹到目标目录（拖拽收文件用，源不动）；同名自动加序号防覆盖
+async function copyInPath(src, dstDir) {
+  const s = resolvePath(src), d = resolvePath(dstDir);
+  let st; try { st = await fsp.stat(s); } catch { return { ok: false, error: '源文件不存在' }; }
+  await fsp.mkdir(d, { recursive: true });
+  let dst = path.join(d, path.basename(s));
+  if (path.resolve(dst) === path.resolve(s)) return { ok: false, error: '源和目标是同一位置' };
+  if (st.isDirectory() && path.resolve(d).startsWith(path.resolve(s) + path.sep)) return { ok: false, error: '不能把文件夹复制进它自己' };
+  if (fs.existsSync(dst)) {
+    const ex = st.isDirectory() ? '' : path.extname(dst);
+    const base = path.basename(dst, ex);
+    let i = 2;
+    while (fs.existsSync(dst)) dst = path.join(d, `${base}-${i++}${ex}`);
+  }
+  try { await fsp.cp(s, dst, { recursive: true, errorOnExist: false }); }
+  catch (e) { return { ok: false, error: e.message }; }
+  return { ok: true, path: dst, name: path.basename(dst) };
+}
+
 // 移动文件到目标目录（截图直通车「收进素材」等用）：同卷 rename，跨卷回退拷贝；同名自动加序号防覆盖
 async function movePath(src, dstDir) {
   const s = resolvePath(src), d = resolvePath(dstDir);
@@ -1182,6 +1201,13 @@ function defaultRoots() {
     ['桌面 (OneDrive)', path.join(HOME, 'OneDrive', '桌面')],
     ['文档 (OneDrive)', path.join(HOME, 'OneDrive', '文档')],
   ];
+  // Windows：把所有就绪的盘符列进快速入口（C: 之外的 D:/E:/… 也能进）
+  if (PLATFORM === 'win32') {
+    for (let c = 65; c <= 90; c++) {
+      const letter = String.fromCharCode(c);
+      candidates.push([`${letter}: 盘`, `${letter}:\\`]);
+    }
+  }
   return candidates
     .filter(([, p]) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } })
     .map(([name, p]) => ({ name, path: p }));
@@ -2064,6 +2090,11 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/move' && req.method === 'POST') {
       const b = await readBody(req);
       return sendJSON(res, 200, await movePath(b.src, b.dstDir));
+    }
+    if (p === '/api/copy-in' && req.method === 'POST') {
+      // 从系统拖文件进文件区 = 复制到当前目录（源文件不动）；同名自动加序号
+      const b = await readBody(req);
+      return sendJSON(res, 200, await copyInPath(b.src, b.dstDir));
     }
     if (p === '/api/rename' && req.method === 'POST') {
       const b = await readBody(req);
