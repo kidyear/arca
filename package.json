@@ -65,8 +65,7 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "灵匣 Arca",
-      "writeUpdateInfo": false
+      "shortcutName": "灵匣 Arca"
     }
   },
   "type": "commonjs",
@@ -97,5 +96,6 @@
     "react-dom": "^19.2.7",
     "xlsx": "^0.18.5"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "author": "SEAVO 信步科技"
 }
