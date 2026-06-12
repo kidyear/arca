@@ -11,6 +11,14 @@
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-06-12
+
+### Fixed
+- Windows 真机 AI relay 修复：隔离用户全局 `~/.claude/settings.json`，避免其中的 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` 覆盖灵匣自己的 DeepSeek 本机中转配置，导致引擎仍然直连旧地址并报 `ConnectionRefused`。
+
+### Verified
+- `npm start` 网页版 + DeepSeek key 发「你好」真实对话跑通，流式返回正常；`node --check ai.js` 通过。
+
 ## [1.7.2] - 2026-06-11
 
 ### Changed

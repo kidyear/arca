@@ -465,6 +465,10 @@ module.exports = function createAI(ctx) {
           model: prov.model,
           resume: chat.sessionId || undefined,
           permissionMode: 'default',
+          // Arca is an embedded app with its own provider switcher. Do not let
+          // the user's global Claude Code settings override ANTHROPIC_* env
+          // (for example a stale ~/.claude/settings.json baseUrl).
+          settingSources: [],
           includePartialMessages: true,
           maxTurns: 100,
           abortController: ac,
