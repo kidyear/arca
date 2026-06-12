@@ -31,10 +31,11 @@ async function getQuery() {
 // ---------- Provider 预设（全部 Anthropic 兼容端点）----------
 const PROVIDERS = {
   claude:   { label: 'Claude (官方)', baseUrl: '', models: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'], keyUrl: 'https://platform.claude.com/settings/keys', note: '不填 key 时用本机已登录的 Claude Code 账号（订阅额度）' },
-  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic', models: ['deepseek-v4-pro', 'deepseek-v4-flash'], keyUrl: 'https://platform.deepseek.com/api_keys' },
-  kimi:     { label: 'Kimi 月之暗面', baseUrl: 'https://api.moonshot.cn/anthropic', models: ['kimi-latest'], keyUrl: 'https://platform.moonshot.cn/console/api-keys' },
-  zhipu:    { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/anthropic', models: ['glm-4.6'], keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys' },
-  minimax:  { label: 'MiniMax', baseUrl: 'https://api.minimaxi.com/anthropic', models: ['MiniMax-M2'], keyUrl: 'https://platform.minimaxi.com/user-center/basic-information/interface-key' },
+  // modelsUrl:各家 OpenAI 风格的模型列表端点(Anthropic 兼容端点大多不实现 /v1/models,拉列表得走这边)
+  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/anthropic', models: ['deepseek-v4-pro', 'deepseek-v4-flash'], keyUrl: 'https://platform.deepseek.com/api_keys', modelsUrl: 'https://api.deepseek.com/v1/models' },
+  kimi:     { label: 'Kimi 月之暗面', baseUrl: 'https://api.moonshot.cn/anthropic', models: ['kimi-latest'], keyUrl: 'https://platform.moonshot.cn/console/api-keys', modelsUrl: 'https://api.moonshot.cn/v1/models' },
+  zhipu:    { label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/anthropic', models: ['glm-4.6'], keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys', modelsUrl: 'https://open.bigmodel.cn/api/paas/v4/models' },
+  minimax:  { label: 'MiniMax', baseUrl: 'https://api.minimaxi.com/anthropic', models: ['MiniMax-M2'], keyUrl: 'https://platform.minimaxi.com/user-center/basic-information/interface-key', modelsUrl: 'https://api.minimaxi.com/v1/models' },
   custom:   { label: '自定义中转 (Anthropic 兼容)', baseUrl: '', models: [], keyUrl: '' },
 };
 
@@ -265,7 +266,7 @@ module.exports = function createAI(ctx) {
       return true;
     }
     if (p === '/api/ai/models' && req.method === 'POST') {
-      // Anthropic 兼容端点不一定都实现 /v1/models；拉不到就回落预设列表
+      // 拉模型列表：先试 Anthropic 风格 /v1/models，再退各家 OpenAI 风格端点（多数兼容端点只实现后者）
       try {
         const body = await readBody(req);
         const preset = PROVIDERS[body.provider]; if (!preset) throw new Error('未知 provider');
@@ -274,13 +275,26 @@ module.exports = function createAI(ctx) {
         const apiKey = body.apiKey || u.apiKey;
         const baseUrl = (body.baseUrl || u.baseUrl || preset.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '');
         if (!apiKey) throw new Error('该服务商需要先填 API key 才能拉取');
-        const r = await fetch(`${baseUrl}/v1/models`, { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } });
-        if (!r.ok) throw new Error(`API ${r.status}`);
-        const j = await r.json();
-        const ids = (j.data || []).map((m) => m.id).filter(Boolean).sort();
-        if (!ids.length) throw new Error('该端点没有返回模型列表');
+        const candidates = [
+          { url: `${baseUrl}/v1/models`, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } },
+        ];
+        if (preset.modelsUrl) candidates.push({ url: preset.modelsUrl, headers: { Authorization: `Bearer ${apiKey}` } });
+        // 自定义中转：同一地址再试一次 Bearer（OpenAI 风格网关常见）
+        if (body.provider === 'custom') candidates.push({ url: `${baseUrl}/v1/models`, headers: { Authorization: `Bearer ${apiKey}` } });
+        let ids = [], lastErr = '';
+        for (const c of candidates) {
+          try {
+            const r = await fetch(c.url, { headers: c.headers });
+            if (!r.ok) { lastErr = `API ${r.status}`; continue; }
+            const j = await r.json();
+            ids = (j.data || []).map((m) => m.id).filter(Boolean).sort();
+            if (ids.length) break;
+            lastErr = '端点没有返回模型列表';
+          } catch (e) { lastErr = e.message; }
+        }
+        if (!ids.length) throw new Error(lastErr || '拉取失败');
         sendJSON(res, 200, { ok: true, models: ids });
-      } catch (e) { sendJSON(res, 200, { ok: false, error: `${e.message}（可直接手填模型 ID）` }); }
+      } catch (e) { sendJSON(res, 200, { ok: false, error: `${e.message}（可直接手填模型 ID，或从下方预设里选）` }); }
       return true;
     }
     if (p === '/api/ai/chats' && req.method === 'GET') {

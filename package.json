@@ -1,6 +1,6 @@
 {
   "name": "arca",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "灵匣 Arca — 文件夹操作 × AI Agent 的结合体。匣中有灵:文件信手可得,活儿交给 AI 办。信步 SEAVO 公司版,基于开源 FanBox。",
   "bin": {
     "fanbox": "server.js"
@@ -21,7 +21,7 @@
   },
   "build": {
     "appId": "com.seavo.arca",
-    "productName": "灵匣 Arca",
+    "productName": "Arca",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -65,7 +65,8 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "灵匣 Arca"
+      "shortcutName": "灵匣 Arca",
+      "uninstallDisplayName": "灵匣 Arca"
     }
   },
   "type": "commonjs",
