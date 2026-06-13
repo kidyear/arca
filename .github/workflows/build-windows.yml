@@ -26,10 +26,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # node-pty 是原生模块，必须针对 Electron 的 ABI 在 Windows 上重新编译
-      # （windows-latest 自带 VS Build Tools + Python，node-gyp 开箱即用）
-      - name: Rebuild node-pty for Electron
-        run: npx electron-rebuild -f -w node-pty
+      # node-pty 1.1.0 已带 Windows x64 预编译包；缺失时才回退 Electron ABI rebuild。
+      # 强制 rebuild 在 GitHub Windows runner 上容易被 VS Build Tools 探测问题卡住。
+      - name: Prepare node-pty for Electron
+        shell: pwsh
+        run: |
+          $prebuild = Join-Path $PWD 'node_modules\node-pty\prebuilds\win32-x64\conpty.node'
+          if (Test-Path $prebuild) {
+            Write-Host "Using bundled node-pty Windows prebuild: $prebuild"
+          } else {
+            Write-Host "node-pty Windows prebuild missing; rebuilding for Electron ABI"
+            npx electron-rebuild -f -w node-pty
+          }
 
       - name: Build NSIS installer
         run: npx electron-builder --win --publish never
