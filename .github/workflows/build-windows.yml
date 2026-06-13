@@ -26,6 +26,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 公司内网更新源:从仓库变量注入(不写死在公开源码里);没配变量则留空(自动更新关闭)
+      - name: Inject company update source
+        run: 'echo "{ ""updateUrl"": ""${{ vars.COMPANY_UPDATE_URL }}"" }" > electron/company.json'
+        shell: bash
+
       # node-pty 1.1.0 已带 Windows x64 预编译包；缺失时才回退 Electron ABI rebuild。
       # 强制 rebuild 在 GitHub Windows runner 上容易被 VS Build Tools 探测问题卡住。
       - name: Prepare node-pty for Electron

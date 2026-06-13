@@ -141,7 +141,9 @@ function cmpVer(a, b) {
 //    ~/.fanbox/config.json 的 "updateUrl" 字段，指向 {"version":"1.6.0","url":"http://内网/安装包或下载页"}
 // 2. GitHub Releases：env FANBOX_UPDATE_REPO=org/repo
 // 3. 默认：Windows 走公司内网源（烧死在安装包里，员工零配置）；macOS 查上游仓库
-const COMPANY_UPDATE_URL = 'http://192.168.11.156/arca/latest.json'; // 信步内网更新源
+// 公司内网更新源:不写死在源码里(仓库公开),构建时由 CI 写入 electron/company.json 注入。
+// 本地开发或公开构建没有这个文件时为空,自动更新自然关闭,不影响功能。
+const COMPANY_UPDATE_URL = (() => { try { return require('./company.json').updateUrl || ''; } catch { return ''; } })();
 function readFanboxConfig() {
   try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.fanbox', 'config.json'), 'utf8')); } catch { return {}; }
 }

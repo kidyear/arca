@@ -36,4 +36,4 @@ node --check <file>    # 任何 JS 改动后必跑
 - 皮肤遵守 SEAVO 设计系统：唯一强调色火焰橘红 #E94A16、近直角 var(--radius)、永不发光；新 UI 在 seavo 主题下别用胶囊圆角
 - 交互对标 Windows 资源管理器（单击选中/双击打开/Ctrl 多选/Delete 回收站）
 - 上游同步：`git fetch origin --tags && git merge <tag>`（origin=alchaincyf/fanbox），合并后必审新增 execFile 的 Windows 兼容性
-- 发版：改 `package.json` version → commit → `git tag vX.Y.Z` → `git push seavo main --tags`（seavo=kidyear/arca）→ Actions 自动出 `Arca-Setup-*.exe` 并发 Release → exe 拷内网 `192.168.11.156` 的 `C:\inetpub\wwwroot\arca\` + 改 `latest.json`
+- 发版：改 `package.json` version → commit → `git tag vX.Y.Z` → `git push seavo main --tags`（seavo=kidyear/arca）→ Actions 自动出 `Arca-Setup-*.exe` 并发 Release → exe 拷到公司内网服务器的发布目录 + 改 `latest.json`（内网地址配在 GitHub 仓库变量 `COMPANY_UPDATE_URL`，构建时注入，不写进源码）
