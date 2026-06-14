@@ -87,6 +87,7 @@ window.FANBOX_DICT = {
   '快捷方式': 'Shortcut',
   '打开目标位置': 'Open target location',
   '目标路径': 'Target path',
+  '复制目标路径': 'Copy target path',
   '新建文件夹…': 'New folder…',
   '新建文件…': 'New file…',
 
@@ -400,6 +401,7 @@ window.FANBOX_DICT_RULES = [
   [/^打开失败：([\s\S]*)$/, (m) => `Open failed: ${m[1]}`],
   [/^打开快捷方式失败：([\s\S]*)$/, (m) => `Open shortcut failed: ${m[1]}`],
   [/^打开目标位置失败：([\s\S]*)$/, (m) => `Open target location failed: ${m[1]}`],
+  [/^复制目标路径失败：([\s\S]*)$/, (m) => `Copy target path failed: ${m[1]}`],
   [/^保存失败：([\s\S]*)$/, (m) => `Save failed: ${m[1]}`],
   [/^重命名失败：([\s\S]*)$/, (m) => `Rename failed: ${m[1]}`],
   [/^新建失败：([\s\S]*)$/, (m) => `Create failed: ${m[1]}`],

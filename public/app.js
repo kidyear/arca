@@ -3567,10 +3567,13 @@ function propertiesPanel(items) {
     ];
   const ov = document.createElement('div');
   ov.className = 'input-overlay prop-overlay';
+  const shortcutActions = single && single.kind === 'shortcut'
+    ? '<button class="ghost-btn" id="prop-copy-target">复制目标路径</button><button class="ghost-btn" id="prop-reveal-target">打开目标位置</button>'
+    : '';
   ov.innerHTML = `<div class="input-dialog prop-dialog">
     <div class="input-title">${single ? escapeHtml(single.name) : `所选 ${items.length} 项`}</div>
     <div class="prop-rows">${rows.map(([k, v]) => `<div class="prop-row" data-prop-key="${escapeHtml(k)}"><span>${escapeHtml(k)}</span><code title="${escapeHtml(v)}">${escapeHtml(v)}</code></div>`).join('')}</div>
-    <div class="input-actions"><button class="ghost-btn" id="prop-copy">复制路径</button>${single && single.isDir ? '<button class="ghost-btn" id="prop-du">占用透视</button>' : ''}<button class="primary" id="prop-ok">确定</button></div>
+    <div class="input-actions"><button class="ghost-btn" id="prop-copy">复制路径</button>${shortcutActions}${single && single.isDir ? '<button class="ghost-btn" id="prop-du">占用透视</button>' : ''}<button class="primary" id="prop-ok">确定</button></div>
   </div>`;
   document.body.appendChild(ov);
   if (single && single.kind === 'shortcut') {
@@ -3597,6 +3600,14 @@ function propertiesPanel(items) {
   ov.onclick = (ev) => { if (ev.target === ov) close(); };
   $('#prop-ok').onclick = close;
   $('#prop-copy').onclick = () => copyPaths(items.map((e) => e.path));
+  const copyTarget = $('#prop-copy-target');
+  if (copyTarget) copyTarget.onclick = async () => {
+    const r = await shortcutTargetInfo(single).catch((err) => ({ ok: false, error: err.message }));
+    if (!r.ok || !r.target) { toast('复制目标路径失败：' + (r.error || '未找到快捷方式目标'), true); return; }
+    copyPaths([r.target]);
+  };
+  const revealTarget = $('#prop-reveal-target');
+  if (revealTarget) revealTarget.onclick = () => revealShortcutTarget(single);
   const du = $('#prop-du'); if (du) du.onclick = () => { close(); diskPanel(single.path); };
 }
 async function showPropertiesSelection() {
