@@ -11,6 +11,20 @@
 
 ## [Unreleased]
 
+## [1.0.14] - 2026-06-14
+
+### Added
+- 删除操作接入撤销栈：普通 Delete / Ctrl+D 先进入 `~/.fanbox/undo-trash`，Ctrl+Z 可原位恢复，Ctrl+Y / Ctrl+Shift+Z 可重做删除；Shift+Delete 仍保留永久删除语义。
+
+### Changed
+- `/api/list` 后端元数据读取从逐项串行 `lstat` 改为 64 路受控并发，减少大目录首屏等待。
+- 子目录项目类型徽标浅探改为 8 路受控并发，并对单目录探测设置 120ms 超时，避免网络盘或权限慢目录拖住基础文件列表。
+
+### Verified
+- `node --check` 覆盖 `server.js`、`public/app.js` 与新增契约脚本。
+- 全部 `scripts/check-*.js` 契约脚本通过。
+- 真实 `/api/list` 请求验证 Node 项目徽标、普通目录和文件返回正常。
+
 ## [1.0.13] - 2026-06-14
 
 ### Added

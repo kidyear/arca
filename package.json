@@ -1,6 +1,6 @@
 {
   "name": "arca",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "灵匣 Arca — 文件夹操作 × AI Agent 的结合体。匣中有灵:文件信手可得,活儿交给 AI 办。深圳信步科技 SEAVO 出品。",
   "bin": {
     "fanbox": "server.js"
