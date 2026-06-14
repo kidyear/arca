@@ -410,15 +410,41 @@ function renderFolderTabs() {
     };
     button.ondragover = (ev) => {
       const draggedId = ev.dataTransfer.getData('application/x-arca-folder-tab');
-      if (!draggedId || draggedId === tab.id) return;
+      if (draggedId) {
+        if (draggedId === tab.id) return;
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'move';
+        return;
+      }
+      const kind = folderTabDropKind(ev.dataTransfer);
+      if (!kind || state.skillsMode || state.recentMode) return;
       ev.preventDefault();
-      ev.dataTransfer.dropEffect = 'move';
+      ev.stopPropagation();
+      ev.dataTransfer.dropEffect = kind === 'external' || ev.ctrlKey || ev.metaKey ? 'copy' : 'move';
+      button.classList.add('drop-target');
     };
-    button.ondrop = (ev) => {
+    button.ondragleave = (ev) => {
+      if (!button.contains(ev.relatedTarget)) button.classList.remove('drop-target');
+    };
+    button.ondrop = async (ev) => {
       const draggedId = ev.dataTransfer.getData('application/x-arca-folder-tab');
-      if (!draggedId || draggedId === tab.id) return;
+      if (draggedId) {
+        if (draggedId === tab.id) return;
+        ev.preventDefault();
+        moveFolderTab(draggedId, tab.id);
+        return;
+      }
+      const kind = folderTabDropKind(ev.dataTransfer);
+      if (!kind || state.skillsMode || state.recentMode) return;
       ev.preventDefault();
-      moveFolderTab(draggedId, tab.id);
+      ev.stopPropagation();
+      button.classList.remove('drop-target');
+      await switchFolderTab(tab.id);
+      if (kind === 'internal') {
+        await dropInternalPathsToDir(internalDragPaths(ev.dataTransfer), tab.path, ev.ctrlKey || ev.metaKey, { reveal: true });
+        return;
+      }
+      await copyExternalFilesToDir(ev.dataTransfer.files, tab.path, { reveal: true });
     };
     button.onmousedown = (ev) => {
       if (ev.button === 1) { ev.preventDefault(); closeFolderTab(tab.id); }
@@ -451,6 +477,13 @@ function renderFolderTabs() {
   host.appendChild(add);
   const active = host.querySelector('.folder-tab.active');
   if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+function folderTabDropKind(dt) {
+  if (!dt) return null;
+  if (dt.types.includes('application/x-arca-folder-tab')) return 'tab';
+  if (isInternalDrag(dt)) return 'internal';
+  if (dt.types.includes('Files')) return 'external';
+  return null;
 }
 function moveFolderTab(fromId, toId) {
   const from = state.folderTabs.findIndex((tab) => tab.id === fromId);
