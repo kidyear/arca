@@ -233,6 +233,10 @@ function fmtSize(n) {
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
   return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
 }
+function fmtDriveFree(drive) {
+  if (!drive || !drive.free || !drive.total) return '';
+  return `可用 ${fmtSize(drive.free)} / 共 ${fmtSize(drive.total)}`;
+}
 function fmtTime(ms) {
   if (!ms) return '';
   const d = new Date(ms);
@@ -3563,6 +3567,11 @@ function navDriveLi(drive) {
   li.classList.add('drive-root');
   const ico = li.querySelector('.ico');
   if (ico) ico.innerHTML = ic('drive', 'currentColor', 16);
+  const label = li.querySelector('.label');
+  if (label && drive.free && drive.total) {
+    const used = Math.round(Math.min(1, Math.max(0, drive.usedRatio || 0)) * 100);
+    label.innerHTML = `<span class="drive-name">${escapeHtml(drive.name)}</span><span class="drive-capacity">${escapeHtml(fmtDriveFree(drive))}</span><span class="drive-bar" aria-hidden="true"><i class="drive-used" style="width:${used}%"></i></span>`;
+  }
   return li;
 }
 async function toggleNavSub(li, dirPath, twirl) {

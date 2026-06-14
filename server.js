@@ -167,7 +167,21 @@ async function listDrives() {
     try {
       const st = await withTimeout(fsp.stat(root), DRIVE_PROBE_TIMEOUT_MS);
       if (!st.isDirectory()) return null;
-      return { name: `${letter}: 盘`, path: root, letter, type: 'drive' };
+      const drive = { name: `${letter}: 盘`, path: root, letter, type: 'drive' };
+      try {
+        const fsStat = await withTimeout(fsp.statfs(root), DRIVE_PROBE_TIMEOUT_MS);
+        const total = Number(fsStat.blocks) * Number(fsStat.bsize);
+        const free = Number(fsStat.bavail ?? fsStat.bfree) * Number(fsStat.bsize);
+        if (Number.isFinite(total) && total > 0 && Number.isFinite(free)) {
+          const used = Math.max(0, total - free);
+          drive.total = total;
+          drive.free = Math.max(0, free);
+          drive.used = used;
+          drive.usedRatio = Math.min(1, Math.max(0, used / total));
+          drive.freeRatio = Math.min(1, Math.max(0, drive.free / total));
+        }
+      } catch { /* 容量读取失败时仍保留盘符入口 */ }
+      return drive;
     } catch {
       return null;
     }

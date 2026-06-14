@@ -145,6 +145,12 @@ kbd {
 .nav-list li .label { overflow: hidden; text-overflow: ellipsis; }
 .nav-list li .unfav { margin-left: auto; opacity: 0; font-size: 11px; }
 .nav-list li:hover .unfav { opacity: 0.6; }
+.nav-list li.drive-root { align-items: flex-start; }
+.nav-list li.drive-root .label { display: block; min-width: 0; flex: 1; }
+.drive-name, .drive-capacity { display: block; overflow: hidden; text-overflow: ellipsis; }
+.drive-capacity { margin-top: 2px; font-size: 10.5px; color: var(--text-faint); }
+.drive-bar { display: block; height: 3px; margin-top: 5px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
+.drive-used { display: block; height: 100%; border-radius: 2px; background: var(--accent); opacity: 0.82; }
 .nav-list li.network-location-add { padding: 0; }
 .nav-add-btn {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 7px;
