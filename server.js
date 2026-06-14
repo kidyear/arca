@@ -21,6 +21,7 @@ const PORT = Number(process.env.FANBOX_PORT) || 4567;
 const CONFIG_DIR = path.join(HOME, '.fanbox');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const THUMB_DIR = path.join(CONFIG_DIR, 'thumbs');
+const UNDO_TRASH_DIR = path.join(CONFIG_DIR, 'undo-trash');
 const PUBLIC = path.join(__dirname, 'public');
 const PLATFORM = process.platform;
 
@@ -511,6 +512,64 @@ function trashPath(p) {
       resolve({ ok: false, error: msg });
     });
   });
+}
+
+function isInsideDir(candidate, root) {
+  const c = path.resolve(candidate);
+  const r = path.resolve(root);
+  const cc = PLATFORM === 'win32' ? c.toLowerCase() : c;
+  const rr = PLATFORM === 'win32' ? r.toLowerCase() : r;
+  return cc === rr || cc.startsWith(rr + path.sep);
+}
+
+async function moveFsPath(src, dst) {
+  try {
+    await fsp.rename(src, dst);
+  } catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    const st = await fsp.lstat(src);
+    await fsp.cp(src, dst, { recursive: st.isDirectory(), errorOnExist: false });
+    await fsp.rm(src, { recursive: st.isDirectory(), force: false, maxRetries: 3, retryDelay: 120 });
+  }
+}
+
+async function trashPathUndoable(p) {
+  let target;
+  try { target = resolvePath(p); } catch { return { ok: false, error: '非法路径' }; }
+  let st;
+  try { st = await fsp.lstat(target); } catch { return { ok: false, error: '文件不存在' }; }
+  if (path.resolve(target) === path.parse(path.resolve(target)).root) return { ok: false, error: '不能删除磁盘根目录' };
+  const bucket = path.join(UNDO_TRASH_DIR, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`);
+  const trashPath = path.join(bucket, path.basename(target));
+  try {
+    await fsp.mkdir(bucket, { recursive: true });
+    await moveFsPath(target, trashPath);
+    return { ok: true, path: trashPath, trashPath, originalPath: target, name: path.basename(target), isDir: st.isDirectory() };
+  } catch (e) {
+    await fsp.rm(bucket, { recursive: true, force: true }).catch(() => {});
+    return { ok: false, error: e.message };
+  }
+}
+
+async function restoreTrashedPath(trashPathInput, originalPathInput) {
+  const trashPath = path.resolve(String(trashPathInput || ''));
+  if (!isInsideDir(trashPath, UNDO_TRASH_DIR)) return { ok: false, error: '非法暂存路径' };
+  let st;
+  try { st = await fsp.lstat(trashPath); } catch { return { ok: false, error: '暂存文件不存在，无法恢复' }; }
+  let originalPath;
+  try { originalPath = resolvePath(originalPathInput); } catch { return { ok: false, error: '非法恢复路径' }; }
+  if (fs.existsSync(originalPath)) return { ok: false, error: '原位置已有同名项目' };
+  try {
+    await fsp.mkdir(path.dirname(originalPath), { recursive: true });
+    await moveFsPath(trashPath, originalPath);
+    const bucket = path.dirname(trashPath);
+    if (isInsideDir(bucket, UNDO_TRASH_DIR) && path.resolve(bucket) !== path.resolve(UNDO_TRASH_DIR)) {
+      await fsp.rmdir(bucket).catch(() => {});
+    }
+    return { ok: true, path: originalPath, name: path.basename(originalPath), isDir: st.isDirectory() };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 async function deletePathPermanent(p) {
@@ -2244,6 +2303,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/trash' && req.method === 'POST') {
       const b = await readBody(req);
       return sendJSON(res, 200, await trashPath(b.path));
+    }
+    if (p === '/api/trash-undoable' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await trashPathUndoable(b.path));
+    }
+    if (p === '/api/trash-restore' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await restoreTrashedPath(b.trashPath, b.path));
     }
     if (p === '/api/delete' && req.method === 'POST') {
       const b = await readBody(req);
