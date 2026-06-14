@@ -54,6 +54,7 @@ npm run dist:win
 | 视频/PDF 缩略图 | 无系统级抽帧工具，回退为矢量图标（预览功能不受影响） |
 | 内容搜索 | 无 Spotlight，走内置纯 Node 全文扫描（行为同 mac 的 grep 兜底） |
 | 删除文件 | 进系统回收站（PowerShell SendToRecycleBin） |
+| 创建快捷方式 | 右键生成 `.lnk`，走 WScript.Shell，支持 Ctrl+Z/Ctrl+Y 撤销重做 |
 | 复制文件本体 | PowerShell Set-Clipboard，资源管理器可直接粘贴 |
 | 「定位到终端目录」 | 不支持（mac 用 lsof 实现），回退为当前浏览目录 |
 | 快捷键 | 界面标签显示 **Ctrl+**（监听本来就同时认 Cmd/Ctrl，无需改习惯） |

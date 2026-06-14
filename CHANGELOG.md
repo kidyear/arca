@@ -11,6 +11,12 @@
 
 ## [Unreleased]
 
+### Added
+- 文件/文件夹右键新增「创建快捷方式」，Windows 下生成 `.lnk` 并支持多选批量创建，生成物接入 Ctrl+Z / Ctrl+Y 撤销重做。
+
+### Fixed
+- PowerShell JSON 返回固定 UTF-8，避免中文路径（如“快捷方式”）在 Node 解析后变成乱码。
+
 ## [1.0.18] - 2026-06-14
 
 ### Added

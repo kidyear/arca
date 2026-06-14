@@ -40,7 +40,7 @@ const SVG = {
   pdf: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M7.6 13.5h1.3a1.2 1.2 0 0 1 0 2.4H7.6zm0 0v4.2"/><path d="M12.4 13.5v4.2h1a1.5 1.5 0 0 0 1.5-1.5v-1.2a1.5 1.5 0 0 0-1.5-1.5z"/>',
 };
 // 按扩展名优先匹配的专属图标（比按 kind 更精准、辨识度更高）
-const ICON_BY_EXT = { md: 'md', markdown: 'md', html: 'html', htm: 'html', pdf: 'pdf' };
+const ICON_BY_EXT = { md: 'md', markdown: 'md', html: 'html', htm: 'html', pdf: 'pdf', lnk: 'link', url: 'link' };
 // UI 图标快捷函数（默认 currentColor，随主题文字色自适应）
 function ic(name, color, size) { return svgWrap(SVG[name], color || 'currentColor', size || 16, false); }
 // ext → 类别 + 颜色
@@ -57,8 +57,9 @@ const EXT_KIND = {
   csv: ['data', '#5bd6a0'], tsv: ['data', '#5bd6a0'], sql: ['data', '#e8a85b'],
   zip: ['archive', '#e8c95b'], rar: ['archive', '#e8c95b'], '7z': ['archive', '#e8c95b'],
   gz: ['archive', '#e8c95b'], tar: ['archive', '#e8c95b'],
+  lnk: ['link', '#5b9ae8'], url: ['link', '#5b9ae8'],
 };
-const KIND_COLOR = { dir: '#6d8bff', image: '#5bd6a0', video: '#9a7be8', audio: '#e85b9a', pdf: '#e85b5b', text: '#9aa3b2', other: '#7a8294' };
+const KIND_COLOR = { dir: '#6d8bff', image: '#5bd6a0', video: '#9a7be8', audio: '#e85b9a', pdf: '#e85b5b', text: '#9aa3b2', shortcut: '#5b9ae8', other: '#7a8294' };
 // 缩略图加载失败时的回退图标
 window.__svgVideo = svgWrap(SVG.video, KIND_COLOR.video, 34);
 window.__svgImg = svgWrap(SVG.image, KIND_COLOR.image, 34);
@@ -270,7 +271,7 @@ function fmtDateTime(ms) {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 }
-const KIND_LABELS = { text: '文本文档', code: '代码文件', image: '图片', video: '视频', audio: '音频', pdf: 'PDF 文档', archive: '压缩包', data: '数据文件' };
+const KIND_LABELS = { text: '文本文档', code: '代码文件', image: '图片', video: '视频', audio: '音频', pdf: 'PDF 文档', archive: '压缩包', data: '数据文件', shortcut: '快捷方式' };
 function kindLabel(e) {
   if (e.isDir) return '文件夹';
   return KIND_LABELS[e.kind] || '文件';
@@ -2678,6 +2679,17 @@ async function undoLast() {
     pushRedo(op);
     return;
   }
+  if (op.type === 'shortcut') {
+    let fail = 0;
+    for (const it of op.items || []) {
+      const r = await apiPost('/api/trash', { path: it.path }).catch((err) => ({ error: err.message }));
+      if (r.error) fail++;
+    }
+    toast(fail ? `撤销快捷方式完成，${fail} 项失败` : `已撤销快捷方式 ${op.items.length} 项`);
+    await refresh();
+    if (!fail) pushRedo(op); else state.undoStack.push(op);
+    return;
+  }
   state.undoStack.push(op);
   toast('这一步暂不支持撤销', true);
 }
@@ -2756,6 +2768,19 @@ async function redoLast() {
     await refresh();
     selectVisiblePaths([r.path]);
     pushUndo({ ...op, path: r.path, name: r.name || baseOf(r.path) }, { clearRedo: false });
+    return;
+  }
+  if (op.type === 'shortcut') {
+    let fail = 0, created = [];
+    for (const it of op.items || []) {
+      const r = await apiPost('/api/shortcut', { path: it.target, dstDir: it.dstDir || dirOf(it.path) }).catch((err) => ({ error: err.message }));
+      if (r.error || !r.ok) fail++;
+      else created.push({ ...it, path: r.path, name: r.name || baseOf(r.path), dstDir: dirOf(r.path) });
+    }
+    toast(fail ? `重做快捷方式完成，${fail} 项失败` : `已重做快捷方式 ${created.length} 项`);
+    await refresh();
+    selectVisiblePaths(created.map((it) => it.path));
+    if (!fail) pushUndo({ ...op, items: created }, { clearRedo: false }); else state.redoStack.push(op);
     return;
   }
   state.redoStack.push(op);
@@ -3377,6 +3402,24 @@ async function createZipFromEntries(items) {
   await refresh();
   selectVisiblePaths([r.path]);
 }
+async function createShortcutForEntries(items) {
+  items = (items || []).filter((e) => e && !e.isDrive);
+  if (!items.length) return;
+  let fail = 0;
+  const created = [];
+  for (const e of items) {
+    const r = await apiPost('/api/shortcut', { path: e.path, dstDir: dirOf(e.path) }).catch((err) => ({ error: err.message }));
+    if (r.error || !r.ok) fail++;
+    else created.push({ target: e.path, path: r.path, name: r.name || baseOf(r.path), dstDir: dirOf(r.path) });
+  }
+  if (created.length) {
+    pushUndo({ type: 'shortcut', items: created, label: '创建快捷方式' });
+    toast(fail ? `已创建 ${created.length} 个快捷方式，${fail} 项失败` : `已创建 ${created.length} 个快捷方式`);
+    await refresh();
+    selectVisiblePaths(created.map((it) => it.path));
+  }
+  if (fail && !created.length) toast('创建快捷方式失败', true);
+}
 async function extractArchiveEntry(e) {
   if (!isExtractableArchive(e)) return;
   const r = await apiPost('/api/archive/extract', { path: e.path }).catch((err) => ({ error: err.message }));
@@ -3565,6 +3608,7 @@ function showContextMenu(ev, e) {
       { label: `剪切 ${n} 项`, fn: () => clipSet('cut') },
       ...(ev.shiftKey ? [{ label: '复制为路径', fn: () => copyPathsQuoted(selPaths()) }] : []),
       { label: `压缩 ${n} 项为 zip`, fn: () => createZipFromEntries(selEntries()) },
+      { label: `创建 ${n} 个快捷方式`, fn: () => createShortcutForEntries(selEntries()) },
       { sep: true },
       { label: `移到废纸篓 ${n} 项`, danger: true, fn: () => trashSelection() },
       { label: `永久删除 ${n} 项`, danger: true, fn: () => deleteSelectionPermanent() },
@@ -3599,6 +3643,7 @@ function showContextMenu(ev, e) {
   items.push({ label: '复制', fn: () => { applySelection(e.path); clipSet('copy'); } });
   items.push({ label: '剪切', fn: () => { applySelection(e.path); clipSet('cut'); } });
   items.push({ label: pathGroup.length > 1 ? `压缩 ${pathGroup.length} 项为 zip` : '压缩为 zip', fn: () => createZipFromEntries(pathGroup.map((p) => state.visible.find((x) => x.path === p)).filter(Boolean)) });
+  items.push({ label: pathGroup.length > 1 ? `创建 ${pathGroup.length} 个快捷方式` : '创建快捷方式', fn: () => createShortcutForEntries(pathGroup.map((p) => state.visible.find((x) => x.path === p)).filter(Boolean)) });
   if ((state.fileClip || window.fanboxClipboard?.readFiles) && e.isDir) items.push({ label: `粘贴到「${e.name}」`, fn: () => clipPaste(e.path) });
   items.push({ sep: true });
   items.push({ label: isFav(e.path) ? '取消收藏' : '收藏', fn: () => toggleFav(e) });

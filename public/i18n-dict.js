@@ -78,6 +78,8 @@ window.FANBOX_DICT = {
   '取消收藏': 'Unfavorite',
   '重命名…': 'Rename…',
   '移到废纸篓': 'Move to Trash',
+  '创建快捷方式': 'Create shortcut',
+  '快捷方式': 'Shortcut',
   '新建文件夹…': 'New folder…',
   '新建文件…': 'New file…',
 
@@ -401,6 +403,13 @@ window.FANBOX_DICT_RULES = [
   [/^复制失败（浏览器限制），路径：([\s\S]+)$/, (m) => `Copy failed (browser limitation). Path: ${m[1]}`],
   // 文件操作
   [/^已另存为 (.+)$/, (m) => `Saved as ${m[1]}`],
+  [/^创建 (\d+) 个快捷方式$/, (m) => `Create ${m[1]} shortcuts`],
+  [/^已创建 (\d+) 个快捷方式$/, (m) => `Created ${m[1]} shortcuts`],
+  [/^已创建 (\d+) 个快捷方式，(\d+) 项失败$/, (m) => `Created ${m[1]} shortcuts, ${m[2]} failed`],
+  [/^已撤销快捷方式 (\d+) 项$/, (m) => `Undid ${m[1]} shortcuts`],
+  [/^撤销快捷方式完成，(\d+) 项失败$/, (m) => `Shortcut undo finished, ${m[1]} failed`],
+  [/^已重做快捷方式 (\d+) 项$/, (m) => `Redid ${m[1]} shortcuts`],
+  [/^重做快捷方式完成，(\d+) 项失败$/, (m) => `Shortcut redo finished, ${m[1]} failed`],
   [/^把文件夹「(.+)」移到废纸篓？可从废纸篓恢复。$/, (m) => `Move folder "${m[1]}" to Trash? You can restore it from Trash.`],
   [/^把「(.+)」移到废纸篓？（系统废纸篓里随时可恢复）$/, (m) => `Move "${m[1]}" to Trash? (Restorable from the system Trash anytime)`],
   [/^刚变更：\n([\s\S]+)$/, (m) => `Just changed:\n${m[1]}`],

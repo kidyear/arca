@@ -50,6 +50,7 @@ const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv']);
 const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac']);
 const PDF_EXT = new Set(['pdf']);
 const ARCHIVE_EXT = new Set(['zip', 'jar', 'tar', 'tgz', 'gz', 'bz2', 'xz', '7z', 'rar']);
+const SHORTCUT_EXT = new Set(['lnk', 'url']);
 
 const MIME = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8',
@@ -90,6 +91,7 @@ function kindOf(name, isDir) {
   if (AUDIO_EXT.has(e)) return 'audio';
   if (PDF_EXT.has(e)) return 'pdf';
   if (ARCHIVE_EXT.has(e)) return 'archive';
+  if (SHORTCUT_EXT.has(e)) return 'shortcut';
   if (TEXT_EXT.has(e) || /^(dockerfile|makefile|readme|license|\.[a-z]+rc)$/i.test(name)) return 'text';
   return 'other';
 }
@@ -583,10 +585,12 @@ function trashPath(p) {
 
 function execPowerShellJson(script, args = [], opts = {}) {
   return new Promise((resolve) => {
-    execFile('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, ...args], {
+    const utf8Script = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [System.Text.UTF8Encoding]::new($false); ${script}`;
+    execFile('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', utf8Script, ...args], {
       windowsHide: true,
       timeout: opts.timeout || 30000,
       maxBuffer: opts.maxBuffer || 1024 * 1024,
+      env: { ...process.env, ...(opts.env || {}) },
     }, (err, stdout, stderr) => {
       if (err) return resolve({ ok: false, error: (stderr || err.message || '').trim() || err.message });
       const text = String(stdout || '').trim();
@@ -1375,6 +1379,42 @@ async function createEntry(parentPath, name, type) {
   if (type === 'dir') await fsp.mkdir(target);
   else await fsp.writeFile(target, '', { flag: 'wx' });
   return { ok: true, path: target, isDir: type === 'dir' };
+}
+
+async function createShortcut(targetPath, dstDir) {
+  if (PLATFORM !== 'win32') return { ok: false, error: '创建快捷方式仅支持 Windows' };
+  const target = resolvePath(targetPath);
+  let st;
+  try { st = await fsp.stat(target); } catch { return { ok: false, error: '目标不存在' }; }
+  const dir = resolvePath(dstDir || path.dirname(target));
+  let dirSt;
+  try { dirSt = await fsp.stat(dir); } catch { return { ok: false, error: '目标文件夹不存在' }; }
+  if (!dirSt.isDirectory()) return { ok: false, error: '目标位置不是文件夹' };
+  const base = path.basename(target) || target.replace(/[\\/:*?"<>|]+/g, '').trim() || '快捷方式';
+  const shortcut = uniqueFsPath(path.join(dir, `${base} - 快捷方式.lnk`));
+  const workingDir = st.isDirectory() ? target : path.dirname(target);
+  const script = `& {
+$ErrorActionPreference = 'Stop'
+$shell = New-Object -ComObject WScript.Shell
+$lnk = $shell.CreateShortcut($env:FANBOX_SHORTCUT_PATH)
+$lnk.TargetPath = $env:FANBOX_SHORTCUT_TARGET
+$lnk.WorkingDirectory = $env:FANBOX_SHORTCUT_WORKDIR
+$lnk.Save()
+[pscustomobject]@{
+  ok = $true
+  path = $env:FANBOX_SHORTCUT_PATH
+  name = [System.IO.Path]::GetFileName($env:FANBOX_SHORTCUT_PATH)
+  isDir = $false
+  target = $env:FANBOX_SHORTCUT_TARGET
+} | ConvertTo-Json -Compress
+}`;
+  return execPowerShellJson(script, [], {
+    env: {
+      FANBOX_SHORTCUT_TARGET: target,
+      FANBOX_SHORTCUT_PATH: shortcut,
+      FANBOX_SHORTCUT_WORKDIR: workingDir,
+    },
+  });
 }
 
 // 终端里点文件名 → 定位真实文件：直接 stat → 用 tail 做「空格扩展」逐候选 stat
@@ -2544,6 +2584,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/create' && req.method === 'POST') {
       const b = await readBody(req);
       return sendJSON(res, 200, await createEntry(b.path, b.name, b.type));
+    }
+    if (p === '/api/shortcut' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await createShortcut(b.path, b.dstDir));
     }
     if (p === '/api/agent-projects') {
       return sendJSON(res, 200, await agentProjects());
