@@ -213,6 +213,7 @@ const state = {
   selectionAnchor: null, // Shift+键盘/点击范围选择的固定锚点路径
   fileClip: null, fileClipSet: new Set(), // 文件剪贴板 {op:'copy'|'cut', paths:[]}; fileClipSet 只缓存剪切项用于淡化标记
   undoStack: [], redoStack: [], // 资源管理器同款 Ctrl+Z/Ctrl+Y：轻量撤销/重做最近文件操作
+  folderTabs: [], activeFolderTab: null, folderTabSeq: 0, // Windows 11 Explorer 式文件夹标签页
   favorites: [], recentOpened: [], recentMode: false, skillsMode: false,
   previewW: Number(localStorage.getItem('fb_preview_w')) || 480,
   previewH: Number(localStorage.getItem('fb_preview_h')) || 340,
@@ -341,10 +342,12 @@ async function navigate(p, pushHistory = true) {
     state.parent = data.parent;
     state.recentMode = false;
     state.skillsMode = false;
+    ensureFolderTabForCwd(data.path);
     state.filter = '';
     syncFilterUi(true);
     state.cursor = -1;
     render();
+    renderFolderTabs();
     if (revealPath) {
       selectVisiblePaths([revealPath]);
       toast('已定位文件');
@@ -353,6 +356,86 @@ async function navigate(p, pushHistory = true) {
     updateWatches();
     if (typeof term !== 'undefined' && term.followBrowse && term.active) term.syncCd(state.cwd);
   } catch (e) { toast('打开失败', true); }
+}
+function folderTabTitle(p) { return baseOf(p || '') || p || '主页'; }
+function ensureFolderTabForCwd(path) {
+  if (!path) return null;
+  let tab = state.folderTabs.find((t) => t.id === state.activeFolderTab);
+  if (!tab) {
+    tab = { id: 'tab-' + (++state.folderTabSeq), path, title: folderTabTitle(path) };
+    state.folderTabs.push(tab);
+    state.activeFolderTab = tab.id;
+    return tab;
+  }
+  tab.path = path;
+  tab.title = folderTabTitle(path);
+  return tab;
+}
+function renderFolderTabs() {
+  const host = $('#folder-tabs');
+  if (!host) return;
+  if (!state.folderTabs.length && state.cwd) ensureFolderTabForCwd(state.cwd);
+  host.innerHTML = '';
+  state.folderTabs.forEach((tab) => {
+    const button = document.createElement('div');
+    button.className = 'folder-tab' + (tab.id === state.activeFolderTab ? ' active' : '');
+    button.dataset.tabId = tab.id;
+    button.title = tab.path;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', tab.id === state.activeFolderTab ? 'true' : 'false');
+    button.tabIndex = 0;
+    button.onclick = () => switchFolderTab(tab.id);
+    button.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); switchFolderTab(tab.id); }
+    };
+    const label = document.createElement('span');
+    label.className = 'folder-tab-label';
+    label.textContent = tab.title;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'folder-tab-close';
+    close.title = '关闭标签页';
+    close.textContent = '×';
+    close.onclick = (ev) => { ev.stopPropagation(); closeFolderTab(tab.id); };
+    button.append(label, close);
+    host.appendChild(button);
+  });
+  const active = host.querySelector('.folder-tab.active');
+  if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+async function newFolderTab(path = state.cwd || state.home) {
+  if (!path) return;
+  const tab = { id: 'tab-' + (++state.folderTabSeq), path, title: folderTabTitle(path) };
+  state.folderTabs.push(tab);
+  state.activeFolderTab = tab.id;
+  renderFolderTabs();
+  await navigate(path, false);
+}
+async function switchFolderTab(id) {
+  const tab = state.folderTabs.find((t) => t.id === id);
+  if (!tab) return;
+  state.activeFolderTab = tab.id;
+  renderFolderTabs();
+  if (tab.path && tab.path !== state.cwd) await navigate(tab.path, false);
+}
+async function closeFolderTab(id) {
+  const idx = state.folderTabs.findIndex((t) => t.id === id);
+  if (idx < 0) return;
+  if (state.folderTabs.length <= 1) { closeCurrentWindow(); return; }
+  const wasActive = state.folderTabs[idx].id === state.activeFolderTab;
+  state.folderTabs.splice(idx, 1);
+  if (wasActive) {
+    const next = state.folderTabs[Math.min(idx, state.folderTabs.length - 1)];
+    await switchFolderTab(next.id);
+  } else {
+    renderFolderTabs();
+  }
+}
+function stepFolderTab(direction) {
+  if (state.folderTabs.length < 2) return;
+  const idx = Math.max(0, state.folderTabs.findIndex((t) => t.id === state.activeFolderTab));
+  const next = (idx + direction + state.folderTabs.length) % state.folderTabs.length;
+  switchFolderTab(state.folderTabs[next].id);
 }
 // 汇总当前要监听的目录：浏览目录 + 每个终端会话的项目目录，发给主进程做增量监听
 function updateWatches() {
@@ -423,6 +506,7 @@ function beginAddressEdit(selectAll = true) {
 
 // ---------- 渲染 ----------
 function render() {
+  renderFolderTabs();
   renderBreadcrumb();
   renderFiles();
   $('#btn-back').disabled = !state.history.length;
@@ -3910,7 +3994,9 @@ function bindEvents() {
     if (!inInput && e.altKey && e.key === 'Enter') { e.preventDefault(); showPropertiesSelection(); return; }
     if (!inInput && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) { e.preventDefault(); openKeyboardContextMenu(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key === '[') { e.preventDefault(); goBack(); return; }
-    if ((e.metaKey || e.ctrlKey) && (e.key === 'w' || e.key === 'W') && !inInput) { e.preventDefault(); closeCurrentWindow(); return; }
+    if (!inInput && mod && e.key === 'Tab') { e.preventDefault(); stepFolderTab(e.shiftKey ? -1 : 1); return; }
+    if (!inInput && mod && !e.shiftKey && !e.altKey && (e.key === 't' || e.key === 'T')) { e.preventDefault(); newFolderTab(); return; }
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'w' || e.key === 'W') && !inInput) { e.preventDefault(); closeFolderTab(state.activeFolderTab); return; }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B') && !inInput) { e.preventDefault(); toggleSidebar(); return; }
     if (inInput) return;
     if (e.key === 'F5') { e.preventDefault(); refreshDir(true); return; }

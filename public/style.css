@@ -199,6 +199,25 @@ kbd {
 
 /* ---------- 主区 ---------- */
 #main { display: flex; flex-direction: column; overflow: hidden; }
+.folder-tabs {
+  display: flex; align-items: flex-end; gap: 3px; min-height: 34px; padding: 5px 12px 0;
+  border-bottom: 1px solid var(--border); background: var(--panel); overflow-x: auto; scrollbar-width: none;
+}
+.folder-tabs::-webkit-scrollbar { display: none; }
+.folder-tab {
+  flex: 0 1 220px; min-width: 96px; max-width: 240px; height: 29px;
+  display: inline-flex; align-items: center; gap: 7px; padding: 0 7px 0 10px;
+  border: 1px solid transparent; border-bottom: none; border-radius: 7px 7px 0 0;
+  background: transparent; color: var(--text-dim); cursor: pointer; font: inherit; font-size: 12px;
+}
+.folder-tab:hover { background: var(--bg-3); color: var(--text); }
+.folder-tab.active { background: var(--bg-2); color: var(--text); border-color: var(--border); font-weight: 650; }
+.folder-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-tab-close {
+  flex: none; width: 17px; height: 17px; border: none; border-radius: 4px; padding: 0;
+  background: transparent; color: var(--text-faint); cursor: pointer; line-height: 17px; font-size: 12px;
+}
+.folder-tab-close:hover { background: var(--bg-3); color: var(--text); }
 #topbar {
   display: flex; align-items: center; gap: 12px; padding: 10px 16px;
   border-bottom: 1px solid var(--border); background: var(--bg-2);
