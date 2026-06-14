@@ -99,8 +99,13 @@ function resolvePath(p) {
   }
   if (/^file:/i.test(input)) {
     try {
-      input = decodeURIComponent(new URL(input).pathname);
-      if (PLATFORM === 'win32') input = input.replace(/^\/+(?=[A-Za-z]:)/, '');
+      const fileUrl = new URL(input);
+      input = decodeURIComponent(fileUrl.pathname);
+      if (PLATFORM === 'win32') {
+        input = fileUrl.hostname
+          ? '\\\\' + fileUrl.hostname + input.replace(/\//g, '\\')
+          : input.replace(/^\/+(?=[A-Za-z]:)/, '');
+      }
     } catch {
       // 不是合法 file URL 时继续按普通路径处理，保持原错误反馈。
     }
@@ -110,7 +115,22 @@ function resolvePath(p) {
   }
   let abs = input.startsWith('~') ? path.join(HOME, input.slice(1)) : input;
   if (!path.isAbsolute(abs)) abs = path.join(HOME, abs);
-  return path.normalize(abs);
+  return PLATFORM === 'win32' ? path.win32.normalize(abs) : path.normalize(abs);
+}
+
+function breadcrumbForPath(dir) {
+  const parsed = path.parse(dir);
+  const root = parsed.root || (PLATFORM === 'win32' ? dir.split(path.sep)[0] + path.sep : path.sep);
+  const rootName = PLATFORM === 'win32' ? (root.replace(/[\\/]+$/, '') || root) : '/';
+  const breadcrumb = [{ name: rootName, path: root }];
+  const relative = path.relative(parsed.root, dir);
+  const parts = relative.split(path.sep).filter(Boolean);
+  let acc = root;
+  for (const part of parts) {
+    acc = path.join(acc, part);
+    breadcrumb.push({ name: part, path: acc });
+  }
+  return breadcrumb;
 }
 
 async function readConfig() {
@@ -205,15 +225,7 @@ async function listDir(dirPath) {
     }));
   }
 
-  const parts = dir.split(path.sep).filter(Boolean);
-  const breadcrumb = [{ name: PLATFORM === 'win32' ? dir.split(path.sep)[0] : '/', path: PLATFORM === 'win32' ? parts[0] + path.sep : path.sep }];
-  let acc = PLATFORM === 'win32' ? parts[0] + path.sep : path.sep;
-  const start = PLATFORM === 'win32' ? 1 : 0;
-  for (let i = start; i < parts.length; i++) {
-    acc = path.join(acc, parts[i]);
-    breadcrumb.push({ name: parts[i], path: acc });
-  }
-  return { path: dir, parent: path.dirname(dir), entries, breadcrumb, project };
+  return { path: dir, parent: path.dirname(dir), entries, breadcrumb: breadcrumbForPath(dir), project };
 }
 
 async function statPath(p) {

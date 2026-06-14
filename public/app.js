@@ -973,6 +973,46 @@ function makeDraggablePath(el, p) {
     if (window.fanboxDrag && window.fanboxDrag.start) window.fanboxDrag.start([p]);
   });
 }
+function bindSidebarDropTarget(li, dirPath) {
+  li.addEventListener('dragover', (ev) => {
+    const t = ev.dataTransfer.types;
+    if (!isInternalDrag(ev.dataTransfer) && !t.includes('Files')) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.dataTransfer.dropEffect = isInternalDrag(ev.dataTransfer) && !(ev.ctrlKey || ev.metaKey) ? 'move' : 'copy';
+    li.classList.add('drop-target');
+  });
+  li.addEventListener('dragleave', (ev) => {
+    if (!li.contains(ev.relatedTarget)) li.classList.remove('drop-target');
+  });
+  li.addEventListener('drop', async (ev) => {
+    const t = ev.dataTransfer.types;
+    if (!isInternalDrag(ev.dataTransfer) && !t.includes('Files')) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    li.classList.remove('drop-target');
+    if (isInternalDrag(ev.dataTransfer)) {
+      await dropInternalPathsToDir(internalDragPaths(ev.dataTransfer), dirPath, ev.ctrlKey || ev.metaKey);
+      return;
+    }
+    if (!window.fanboxDrop || !ev.dataTransfer.files) { toast('浏览器版无法读取拖入文件路径，请用桌面版', true); return; }
+    let okCount = 0, lastErr = '';
+    const undoItems = [];
+    for (const f of [...ev.dataTransfer.files]) {
+      const src = window.fanboxDrop.pathForFile(f);
+      if (!src) { lastErr = `${f.name} 没有可读取的源路径`; continue; }
+      const r = await apiPost('/api/copy-in', { src, dstDir: dirPath }).catch((err) => ({ ok: false, error: err.message }));
+      if (r.ok) { okCount++; undoItems.push({ path: r.path, from: src }); }
+      else lastErr = r.error || '复制失败';
+    }
+    if (okCount) {
+      pushUndo({ type: 'copy', items: undoItems, label: '复制' });
+      toast(`已复制 ${okCount} 个到 ${baseOf(dirPath) || dirPath}`);
+      if (pathContains(state.cwd, dirPath) || pathContains(dirPath, state.cwd)) await refresh();
+    }
+    if (lastErr) toast(lastErr, true);
+  });
+}
 function registerEntryElement(el, path) {
   if (el && path) state.domByPath.set(path, el);
 }
@@ -3126,6 +3166,7 @@ function navDirLi(name, p) {
     ]);
   };
   makeDraggablePath(li, p);
+  bindSidebarDropTarget(li, p);
   return li;
 }
 async function toggleNavSub(li, dirPath, twirl) {
@@ -3142,6 +3183,31 @@ async function toggleNavSub(li, dirPath, twirl) {
     dirs.forEach((e) => ul.appendChild(navDirLi(e.name, e.path)));
   } catch { ul.remove(); twirl.textContent = '▸'; }
 }
+function networkLocationLi() {
+  const li = document.createElement('li');
+  li.className = 'network-location-add';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'nav-add-btn';
+  btn.dataset.action = 'network-location';
+  btn.innerHTML = `<span class="twirl"></span><span class="ico">${ic('folder', 'currentColor', 16)}</span><span class="label">添加网络位置…</span>`;
+  btn.title = '固定 NAS / 共享盘路径，例如 \\\\server\\share';
+  li.appendChild(btn);
+  return li;
+}
+async function addNetworkLocation() {
+  const input = await inputDialog('添加网络位置', '', '例如 \\\\server\\share 或 file://server/share');
+  if (!input) return;
+  const r = await api('/api/stat?path=' + encodeURIComponent(input)).catch((err) => ({ ok: false, error: err.message }));
+  if (!r || !r.ok) { toast('网络位置不可用：' + ((r && r.error) || '无法访问'), true); return; }
+  if (!r.isDir) { toast('网络位置必须是文件夹', true); return; }
+  if (isFav(r.path)) { toast('这个位置已在收藏里'); return; }
+  const name = r.name || baseOf(r.path) || r.path;
+  const saved = await apiPost('/api/favorites', { path: r.path, name, isDir: true }).catch((err) => ({ error: err.message }));
+  if (saved.error) { toast('添加失败：' + saved.error, true); return; }
+  await loadFavorites();
+  toast(`已添加网络位置：${name}`);
+}
 async function loadRoots() {
   const data = await api('/api/roots');
   state.home = data.home;
@@ -3150,6 +3216,7 @@ async function loadRoots() {
   const ul = $('#roots-list');
   ul.innerHTML = '';
   data.roots.forEach((r) => ul.appendChild(navDirLi(r.name, r.path)));
+  ul.appendChild(networkLocationLi());
   renderSidebarActive();
 }
 function renderSidebarActive() {
@@ -3529,6 +3596,11 @@ function bindEvents() {
   $('#btn-terminal').onclick = () => term.toggle();
   $('#term-claude').onclick = () => term.launchAgent('claude --dangerously-skip-permissions');
   $('#term-codex').onclick = () => term.launchAgent('codex');
+  $('#roots-list').addEventListener('click', (e) => {
+    if (!e.target.closest('.network-location-add')) return;
+    e.preventDefault();
+    addNetworkLocation();
+  });
   usagePanel.bind();
   shotTray.init();
   $('#skills-entry').onclick = () => skillsView.show();
@@ -3724,6 +3796,7 @@ function bindEvents() {
     if (e.key === 'F6') { e.preventDefault(); cycleFileManagerFocus(e.shiftKey); return; }
     if (!inInput && (e.key === 'BrowserBack' || e.key === 'GoBack')) { e.preventDefault(); goBack(); return; }
     if (!inInput && (e.key === 'BrowserForward' || e.key === 'GoForward')) { e.preventDefault(); goForward(); return; }
+    if (!inInput && e.key === 'F3') { e.preventDefault(); focusFileFilter(); return; }
     if (!inInput && (e.metaKey || e.ctrlKey) && ['f', 'F', 'e', 'E'].includes(e.key)) { e.preventDefault(); focusFileFilter(); return; }
     if (!inInput && ((e.ctrlKey && (e.key === 'l' || e.key === 'L')) || (e.altKey && (e.key === 'd' || e.key === 'D')) || e.key === 'F4')) {
       e.preventDefault(); beginAddressEdit(); return;

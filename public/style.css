@@ -145,6 +145,12 @@ kbd {
 .nav-list li .label { overflow: hidden; text-overflow: ellipsis; }
 .nav-list li .unfav { margin-left: auto; opacity: 0; font-size: 11px; }
 .nav-list li:hover .unfav { opacity: 0.6; }
+.nav-list li.network-location-add { padding: 0; }
+.nav-add-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text-dim); font: inherit; text-align: left; cursor: pointer;
+}
+.nav-add-btn:hover, .nav-add-btn:focus-visible { background: var(--bg-3); color: var(--text); outline: none; }
 .nav-empty { padding: 4px 8px; font-size: 12px; color: var(--text-faint); }
 /* 侧栏目录树：展开箭头 + 子级缩进 */
 .nav-list li .twirl { flex-shrink: 0; width: 13px; margin-right: -4px; text-align: center; font-size: 9px; color: var(--text-faint); border-radius: 3px; }
