@@ -358,17 +358,31 @@ async function navigate(p, pushHistory = true) {
   } catch (e) { toast('打开失败', true); }
 }
 function folderTabTitle(p) { return baseOf(p || '') || p || '主页'; }
+function activeFolderTab() {
+  return state.folderTabs.find((t) => t.id === state.activeFolderTab) || null;
+}
+function syncActiveFolderTabNavigation() {
+  const tab = activeFolderTab();
+  if (!tab) return;
+  tab.history = [...state.history];
+  tab.forwardHistory = [...state.forwardHistory];
+}
+function restoreFolderTabNavigation(tab) {
+  state.history = [...(tab.history || [])];
+  state.forwardHistory = [...(tab.forwardHistory || [])];
+}
 function ensureFolderTabForCwd(path) {
   if (!path) return null;
   let tab = state.folderTabs.find((t) => t.id === state.activeFolderTab);
   if (!tab) {
-    tab = { id: 'tab-' + (++state.folderTabSeq), path, title: folderTabTitle(path) };
+    tab = { id: 'tab-' + (++state.folderTabSeq), path, title: folderTabTitle(path), history: [], forwardHistory: [] };
     state.folderTabs.push(tab);
     state.activeFolderTab = tab.id;
     return tab;
   }
   tab.path = path;
   tab.title = folderTabTitle(path);
+  syncActiveFolderTabNavigation();
   return tab;
 }
 function renderFolderTabs() {
@@ -411,17 +425,22 @@ function renderFolderTabs() {
 }
 async function newFolderTab(path = state.cwd || state.home) {
   if (!path) return;
-  const tab = { id: 'tab-' + (++state.folderTabSeq), path, title: folderTabTitle(path) };
+  syncActiveFolderTabNavigation();
+  const tab = { id: 'tab-' + (++state.folderTabSeq), path, title: folderTabTitle(path), history: [], forwardHistory: [] };
   state.folderTabs.push(tab);
   state.activeFolderTab = tab.id;
+  restoreFolderTabNavigation(tab);
   renderFolderTabs();
   await navigate(path, false);
 }
 async function switchFolderTab(id) {
   const tab = state.folderTabs.find((t) => t.id === id);
   if (!tab) return;
+  syncActiveFolderTabNavigation();
   state.activeFolderTab = tab.id;
+  restoreFolderTabNavigation(tab);
   renderFolderTabs();
+  syncNavButtons();
   if (tab.path && tab.path !== state.cwd) await navigate(tab.path, false);
 }
 async function closeFolderTab(id) {
@@ -431,7 +450,12 @@ async function closeFolderTab(id) {
   const closed = state.folderTabs[idx];
   const wasActive = closed.id === state.activeFolderTab;
   state.folderTabs.splice(idx, 1);
-  state.closedFolderTabs.push({ path: closed.path, title: closed.title });
+  state.closedFolderTabs.push({
+    path: closed.path,
+    title: closed.title,
+    history: [...(closed.history || [])],
+    forwardHistory: [...(closed.forwardHistory || [])],
+  });
   if (wasActive) {
     const next = state.folderTabs[Math.min(idx, state.folderTabs.length - 1)];
     await switchFolderTab(next.id);
@@ -442,9 +466,17 @@ async function closeFolderTab(id) {
 async function restoreClosedFolderTab() {
   const closed = state.closedFolderTabs.pop();
   if (!closed || !closed.path) return;
-  const tab = { id: 'tab-' + (++state.folderTabSeq), path: closed.path, title: closed.title || folderTabTitle(closed.path) };
+  syncActiveFolderTabNavigation();
+  const tab = {
+    id: 'tab-' + (++state.folderTabSeq),
+    path: closed.path,
+    title: closed.title || folderTabTitle(closed.path),
+    history: [...(closed.history || [])],
+    forwardHistory: [...(closed.forwardHistory || [])],
+  };
   state.folderTabs.push(tab);
   state.activeFolderTab = tab.id;
+  restoreFolderTabNavigation(tab);
   renderFolderTabs();
   await navigate(tab.path, false);
 }
@@ -522,12 +554,15 @@ function beginAddressEdit(selectAll = true) {
 }
 
 // ---------- 渲染 ----------
+function syncNavButtons() {
+  $('#btn-back').disabled = !state.history.length;
+  $('#btn-forward').disabled = !state.forwardHistory.length;
+}
 function render() {
   renderFolderTabs();
   renderBreadcrumb();
   renderFiles();
-  $('#btn-back').disabled = !state.history.length;
-  $('#btn-forward').disabled = !state.forwardHistory.length;
+  syncNavButtons();
   renderSidebarActive();
   syncPreviewPaneButton();
 }
