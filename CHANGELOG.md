@@ -11,6 +11,22 @@
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-06-14
+
+### Added
+- 文件管理器替代度继续补齐：支持地址栏路径直达与 Windows `%VAR%` 环境变量、资源管理器复制为路径、列表类型列、列宽拖拽与自动适配、zip 压缩/解压、Alt+双击/Alt+Enter 属性面板、鼠标中键/Ctrl+Enter 文件夹新窗口、Ctrl+N 新窗口和 Ctrl+W 关闭窗口。
+- 键盘与选择体验增强：文件名快速定位、方向键同步选择、Shift 范围选择、Shift+F10/ContextMenu 键菜单、Ctrl+Shift+C 复制路径、Shift+Delete 永久删除、Backspace 优先后退、Ctrl+Y 重做、当前项键盘操作 selected 兜底。
+
+### Changed
+- 大目录渲染与交互性能优化：分片渲染、排序 collator 缓存、当前目录搜索缓存、选择统计缓存、DOM path 索引、剪切态 Set 查找、类型标签映射提升为模块常量，降低高频操作下的重复扫描和分配。
+- 更贴近 Windows 资源管理器习惯：慢速二次点击重命名、扩展名改名提醒、同目录复制自动生成副本、剪切视觉淡化、面包屑拖放整理、空白右键当前文件夹操作和收藏入口。
+
+### Fixed
+- 修复多项“看起来已选中但快捷键作用不到当前项”的边缘状态，Enter/F2/Space/Ctrl+Space/Ctrl+Shift+C/删除/属性/键盘菜单等操作会在 cursor 缺失时回落到可见 selected。
+
+### Verified
+- `node --check` 覆盖本次改动 JS 与所有契约脚本；12 个文件管理契约脚本全部通过。
+
 ## [1.0.6] - 2026-06-12
 
 ### Fixed
