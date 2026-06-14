@@ -159,6 +159,22 @@ function withTimeout(promise, ms) {
   ]);
 }
 
+async function driveUsage(root) {
+  const fsStat = await withTimeout(fsp.statfs(root), DRIVE_PROBE_TIMEOUT_MS);
+  const total = Number(fsStat.blocks) * Number(fsStat.bsize);
+  const free = Number(fsStat.bavail ?? fsStat.bfree) * Number(fsStat.bsize);
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(free)) return {};
+  const used = Math.max(0, total - free);
+  const safeFree = Math.max(0, free);
+  return {
+    total,
+    free: safeFree,
+    used,
+    usedRatio: Math.min(1, Math.max(0, used / total)),
+    freeRatio: Math.min(1, Math.max(0, safeFree / total)),
+  };
+}
+
 async function listDrives() {
   if (PLATFORM !== 'win32') return [{ name: '文件系统 /', path: '/', type: 'root' }];
   const letters = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
@@ -169,17 +185,7 @@ async function listDrives() {
       if (!st.isDirectory()) return null;
       const drive = { name: `${letter}: 盘`, path: root, letter, type: 'drive' };
       try {
-        const fsStat = await withTimeout(fsp.statfs(root), DRIVE_PROBE_TIMEOUT_MS);
-        const total = Number(fsStat.blocks) * Number(fsStat.bsize);
-        const free = Number(fsStat.bavail ?? fsStat.bfree) * Number(fsStat.bsize);
-        if (Number.isFinite(total) && total > 0 && Number.isFinite(free)) {
-          const used = Math.max(0, total - free);
-          drive.total = total;
-          drive.free = Math.max(0, free);
-          drive.used = used;
-          drive.usedRatio = Math.min(1, Math.max(0, used / total));
-          drive.freeRatio = Math.min(1, Math.max(0, drive.free / total));
-        }
+        Object.assign(drive, await driveUsage(root));
       } catch { /* 容量读取失败时仍保留盘符入口 */ }
       return drive;
     } catch {
@@ -290,7 +296,7 @@ async function statPath(p) {
   const st = await fsp.lstat(real);
   const isDir = st.isDirectory();
   const name = path.basename(real) || real;
-  return {
+  const info = {
     ok: true,
     path: real,
     name,
@@ -301,6 +307,10 @@ async function statPath(p) {
     mtime: st.mtimeMs,
     btime: st.birthtimeMs || 0,
   };
+  if (isDir && path.resolve(real) === path.parse(real).root) {
+    try { Object.assign(info, await driveUsage(real)); } catch { /* 非本地盘/权限问题时保持普通属性 */ }
+  }
+  return info;
 }
 
 async function readFile(filePath) {

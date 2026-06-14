@@ -3323,6 +3323,11 @@ function propertiesPanel(items) {
       ['类型', kindLabel(single)],
       ['位置', dirOf(single.path)],
       ['大小', single.isDir ? '文件夹大小可用「占用透视」计算' : `${fmtSize(single.size || 0)} (${single.size || 0} 字节)`],
+      ...(single.total && single.free ? [
+        ['可用空间', `${fmtSize(single.free)} (${single.free} 字节)`],
+        ['总容量', `${fmtSize(single.total)} (${single.total} 字节)`],
+        ['已用比例', `${Math.round(single.usedRatio * 100)}%`],
+      ] : []),
       ['修改时间', fmtDateTime(single.mtime)],
       ['创建时间', fmtDateTime(single.btime)],
       ['完整路径', single.path],

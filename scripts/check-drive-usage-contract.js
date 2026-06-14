@@ -13,14 +13,16 @@ function assertIncludes(label, text, needle) {
   if (!text.includes(needle)) throw new Error(`${label} missing: ${needle}`);
 }
 
+const driveUsage = server.slice(server.indexOf('async function driveUsage'), server.indexOf('async function listDrives'));
 const listDrives = server.slice(server.indexOf('async function listDrives'), server.indexOf('async function readConfig'));
 
-assertIncludes('listDrives', listDrives, 'fsp.statfs(root)');
-assertIncludes('listDrives', listDrives, 'const total =');
-assertIncludes('listDrives', listDrives, 'const free =');
-assertIncludes('listDrives', listDrives, 'const used =');
-assertIncludes('listDrives', listDrives, 'usedRatio');
-assertIncludes('listDrives', listDrives, 'freeRatio');
+assertIncludes('driveUsage', driveUsage, 'fsp.statfs(root)');
+assertIncludes('driveUsage', driveUsage, 'const total =');
+assertIncludes('driveUsage', driveUsage, 'const free =');
+assertIncludes('driveUsage', driveUsage, 'const used =');
+assertIncludes('driveUsage', driveUsage, 'usedRatio');
+assertIncludes('driveUsage', driveUsage, 'freeRatio');
+assertIncludes('listDrives', listDrives, 'Object.assign(drive, await driveUsage(root))');
 
 assertIncludes('app', app, 'function fmtDriveFree');
 assertIncludes('app', app, 'drive-capacity');
