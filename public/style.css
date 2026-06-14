@@ -130,6 +130,9 @@ kbd {
 
 .nav-section { margin-bottom: 18px; }
 .nav-title { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 1px; padding: 0 8px 6px; display: flex; align-items: center; gap: 5px; }
+.nav-title-action { cursor: pointer; user-select: none; border-radius: 6px; }
+.nav-title-action:hover { color: var(--text-dim); }
+.nav-title-action.active { color: var(--accent); }
 .nav-title svg { flex-shrink: 0; }
 .brand .logo { display: inline-flex; }
 .ct-label { display: inline-flex; align-items: center; gap: 7px; }
@@ -151,6 +154,9 @@ kbd {
 .drive-capacity { margin-top: 2px; font-size: 10.5px; color: var(--text-faint); }
 .drive-bar { display: block; height: 3px; margin-top: 5px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
 .drive-used { display: block; height: 100%; border-radius: 2px; background: var(--accent); opacity: 0.82; }
+.item .drive-tile-icon { color: var(--accent); }
+.item .drive-tile-capacity { display: block; max-width: 150px; margin: 6px auto 0; font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .drive-bar { width: min(150px, 90%); margin: 6px auto 0; }
 .nav-list li.network-location-add { padding: 0; }
 .nav-add-btn {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 7px;

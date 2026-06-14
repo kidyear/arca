@@ -215,7 +215,7 @@ const state = {
   fileClip: null, fileClipSet: new Set(), // 文件剪贴板 {op:'copy'|'cut', paths:[]}; fileClipSet 只缓存剪切项用于淡化标记
   undoStack: [], redoStack: [], // 资源管理器同款 Ctrl+Z/Ctrl+Y：轻量撤销/重做最近文件操作
   folderTabs: [], activeFolderTab: null, folderTabSeq: 0, closedFolderTabs: [], // Windows 11 Explorer 式文件夹标签页
-  favorites: [], drives: [], recentOpened: [], recentMode: false, skillsMode: false,
+  favorites: [], drives: [], recentOpened: [], recentMode: false, skillsMode: false, virtualMode: null,
   previewW: Number(localStorage.getItem('fb_preview_w')) || 480,
   previewH: Number(localStorage.getItem('fb_preview_h')) || 340,
   sidebarCollapsed: localStorage.getItem('fb_sidebar_collapsed') === '1',
@@ -236,6 +236,24 @@ function fmtSize(n) {
 function fmtDriveFree(drive) {
   if (!drive || !drive.free || !drive.total) return '';
   return `可用 ${fmtSize(drive.free)} / 共 ${fmtSize(drive.total)}`;
+}
+function driveToEntry(drive) {
+  return {
+    name: drive.name,
+    path: drive.path,
+    isDir: true,
+    isDrive: true,
+    kind: 'dir',
+    size: 0,
+    mtime: 0,
+    btime: 0,
+    hidden: false,
+    total: drive.total,
+    free: drive.free,
+    used: drive.used,
+    usedRatio: drive.usedRatio,
+    freeRatio: drive.freeRatio,
+  };
 }
 function fmtTime(ms) {
   if (!ms) return '';
@@ -326,6 +344,10 @@ const isMdName = (n) => /\.(md|markdown)$/i.test(String(n || ''));
 // ---------- 导航 ----------
 async function navigate(p, pushHistory = true) {
   if (!await guardDirty()) return;
+  if (p === 'this-pc') {
+    await openThisPcView(pushHistory);
+    return;
+  }
   try {
     let data = await api('/api/list?path=' + encodeURIComponent(p));
     let revealPath = null;
@@ -347,6 +369,7 @@ async function navigate(p, pushHistory = true) {
     state.parent = data.parent;
     state.recentMode = false;
     state.skillsMode = false;
+    state.virtualMode = null;
     ensureFolderTabForCwd(data.path);
     state.filter = '';
     syncFilterUi(true);
@@ -362,7 +385,7 @@ async function navigate(p, pushHistory = true) {
     if (typeof term !== 'undefined' && term.followBrowse && term.active) term.syncCd(state.cwd);
   } catch (e) { toast('打开失败', true); }
 }
-function folderTabTitle(p) { return baseOf(p || '') || p || '主页'; }
+function folderTabTitle(p) { return p === 'this-pc' ? '此电脑' : (baseOf(p || '') || p || '主页'); }
 function activeFolderTab() {
   return state.folderTabs.find((t) => t.id === state.activeFolderTab) || null;
 }
@@ -700,6 +723,7 @@ function renderBreadcrumb() {
   bc.title = state.cwd || '';
   if (state.skillsMode) { bc.innerHTML = `<span class="crumb last">Skills 透视</span>`; return; }
   if (state.recentMode) { bc.innerHTML = `<span class="crumb last">${ic('clock', 'currentColor', 15)} 最近修改的文件</span>`; return; }
+  if (state.virtualMode === 'this-pc') { bc.innerHTML = `<span class="crumb last">${ic('drive', 'currentColor', 15)} 此电脑</span>`; return; }
   (state.breadcrumb || []).forEach((c, i, arr) => {
     if (i > 0) { const s = document.createElement('span'); s.className = 'sep'; s.textContent = '›'; bc.appendChild(s); }
     const el = document.createElement('span');
@@ -1107,10 +1131,16 @@ function measureCols() {
   state.cols = Math.max(1, c);
 }
 function favBtn(e) {
+  if (e.isDrive) return '<span class="fav-spacer"></span>';
   const on = isFav(e.path);
   return `<span class="fav-btn ${on ? 'on' : ''}" title="收藏">${svgWrap(SVG.star, 'currentColor', 15, on)}</span>`;
 }
 function thumbHtml(e) {
+  if (e.isDrive) {
+    const used = Math.round(Math.min(1, Math.max(0, e.usedRatio || 0)) * 100);
+    const cap = fmtDriveFree(e);
+    return `<span class="svg-icon drive-tile-icon">${ic('drive', 'currentColor', 56)}</span>${cap ? `<span class="drive-tile-capacity">${escapeHtml(cap)}</span><span class="drive-bar" aria-hidden="true"><i class="drive-used" style="width:${used}%"></i></span>` : ''}`;
+  }
   // 关键性能修复：用缩略图端点（sips/qlmanage 缓存小图），不再把原图/原视频整文件拉进来解码
   if (e.kind === 'image' || e.kind === 'video') {
     const w = state.gridSize === 'lg' ? 320 : (state.gridSize === 'sm' ? 160 : 240);
@@ -1684,7 +1714,7 @@ function onItemClick(e) {
   applySelection(e.path);
   if (previewVisible() && !samePreviewed) previewEntry(e);
 }
-function onItemOpen(e) { if (e.isDir) navigate(e.path); else openWith(e.path, 'default'); }
+function onItemOpen(e) { if (e.isDrive) navigate(e.path); else if (e.isDir) navigate(e.path); else openWith(e.path, 'default'); }
 
 // ---------- 主区键盘导航 ----------
 function highlightCursor(force = false) {
@@ -2674,6 +2704,11 @@ async function toggleFav(e) {
 // ---------- 文件操作（编辑 / 重命名 / 废纸篓 / 新建）----------
 // 重拉当前目录但保留筛选词，操作后刷新视图
 async function refresh() {
+  if (state.virtualMode === 'this-pc') {
+    await loadDrives();
+    await openThisPcView(false);
+    return;
+  }
   if (!state.cwd || state.recentMode) return;
   const oldSelected = state.selected;
   const oldMultiSel = new Set(state.multiSel);
@@ -3673,10 +3708,34 @@ async function loadDrives() {
     ul.innerHTML = '<div class="nav-empty">磁盘读取失败</div>';
   }
 }
+async function openThisPcView(pushHistory = true) {
+  if (!await guardDirty()) return;
+  if (!state.drives.length) await loadDrives();
+  if (pushHistory && state.cwd && state.cwd !== 'this-pc') {
+    state.history.push(state.cwd);
+    state.forwardHistory = [];
+  }
+  state.cwd = 'this-pc';
+  state.virtualMode = 'this-pc';
+  state.recentMode = false;
+  state.skillsMode = false;
+  state.project = null;
+  state.parent = null;
+  state.breadcrumb = [{ name: '此电脑', path: 'this-pc' }];
+  state.entries = prepareEntries(state.drives.map(driveToEntry));
+  state.filter = '';
+  state.cursor = -1;
+  ensureFolderTabForCwd('this-pc');
+  syncFilterUi(true);
+  render();
+  renderFolderTabs();
+}
 function renderSidebarActive() {
   const rows = [...document.querySelectorAll('#sidebar li[data-path]')];
   rows.forEach((li) => li.classList.remove('active'));
+  $('#this-pc-entry')?.classList.toggle('active', state.virtualMode === 'this-pc');
   if (!state.cwd || state.recentMode || state.skillsMode) return;
+  if (state.virtualMode === 'this-pc') return;
   let best = null, bestLen = -1;
   rows.forEach((li) => {
     const p = li.dataset.path;
@@ -3808,6 +3867,7 @@ async function loadAgentProjects() {
 // 都能直接作用在最近列表上，不会把视图无声切回上一个目录
 async function showRecent() {
   state.recentMode = true;
+  state.virtualMode = null;
   state.filter = '';
   syncFilterUi(true);
   state.cursor = -1;
@@ -3820,6 +3880,7 @@ async function showRecent() {
   state.entries = prepareEntries((data.results || []).map((e) => ({ ...e, hidden: false })));
   state.recentTruncated = !!data.truncated;
   renderFiles();
+  renderSidebarActive();
 }
 function truncNote() {
   return `<div class="trunc-note">⚠ 文件太多，结果可能不完整。进入更具体的子目录可看到全部。</div>`;
@@ -4046,6 +4107,7 @@ function bindEvents() {
   $('#btn-preview-pane').onclick = () => togglePreviewPane();
   $('#cmdk-trigger').onclick = () => cmdk.open();
   $('#btn-recent').onclick = showRecent;
+  $('#this-pc-entry')?.addEventListener('click', openThisPcView);
   $('#btn-changes').onclick = () => toggleChangesPanel();
   $('#btn-terminal').onclick = () => term.toggle();
   $('#term-claude').onclick = () => term.launchAgent('claude --dangerously-skip-permissions');
@@ -5073,7 +5135,8 @@ const usagePanel = {
 const skillsView = {
   data: null, filter: 'all', sort: 'hits', open: new Set(),
   async show() {
-    state.skillsMode = true; state.recentMode = false; state.cursor = -1;
+    state.skillsMode = true; state.recentMode = false; state.virtualMode = null; state.cursor = -1;
+    renderSidebarActive();
     renderBreadcrumb();
     $('#file-area').innerHTML = '<div class="cmdk-loading">扫描本机 skills…</div>';
     try { this.data = await api('/api/skills'); } catch { $('#file-area').innerHTML = '<div class="nav-empty">扫描失败</div>'; return; }
