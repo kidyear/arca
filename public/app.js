@@ -4175,6 +4175,8 @@ function bindEvents() {
     if (!inInput && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) { e.preventDefault(); openKeyboardContextMenu(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key === '[') { e.preventDefault(); goBack(); return; }
     if (!inInput && mod && e.key === 'Tab') { e.preventDefault(); stepFolderTab(e.shiftKey ? -1 : 1); return; }
+    if (!inInput && mod && !e.shiftKey && !e.altKey && e.key === 'PageUp') { e.preventDefault(); stepFolderTab(-1); return; }
+    if (!inInput && mod && !e.shiftKey && !e.altKey && e.key === 'PageDown') { e.preventDefault(); stepFolderTab(1); return; }
     if (!inInput && mod && e.shiftKey && !e.altKey && (e.key === 't' || e.key === 'T')) { e.preventDefault(); restoreClosedFolderTab(); return; }
     if (!inInput && mod && !e.shiftKey && !e.altKey && (e.key === 't' || e.key === 'T')) { e.preventDefault(); newFolderTab(); return; }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'w' || e.key === 'W') && !inInput) { e.preventDefault(); closeFolderTab(state.activeFolderTab); return; }
