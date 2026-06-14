@@ -3565,6 +3565,7 @@ function showContextMenu(ev, e) {
   const items = [];
   if (e.isDir) items.push({ label: '打开', fn: () => navigate(e.path) });
   else items.push({ label: '预览', fn: () => { state.selected = e.path; openPreview(e); renderFiles(); } });
+  if (state.searchMode || state.recentMode) items.push({ label: '打开所在位置', fn: () => revealEntryInCurrentApp(e) });
   if (e.isDir) items.push({ label: '在新标签页打开', fn: () => openFolderInNewTab(e.path) });
   if (e.isDir) items.push({ label: '在新窗口打开', fn: () => openNewWindow(e.path) });
   if (e.isDir) items.push({ label: 'AI 整理…', fn: () => organizeLaunch(e.path) });
@@ -3914,6 +3915,14 @@ async function openRecent(p) {
   state.selected = p;
   openPreview(e);
   renderFiles();
+}
+async function revealEntryInCurrentApp(e) {
+  if (!e || !e.path) return;
+  const targetDir = dirOf(e.path);
+  await navigate(targetDir).catch(() => {});
+  const ok = selectVisiblePaths([e.path]);
+  if (!ok) { toast('文件不在原位置了（可能被移动或删除）', true); return; }
+  toast('已打开所在位置');
 }
 async function removeRecent(p) {
   try {
