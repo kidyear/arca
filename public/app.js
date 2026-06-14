@@ -433,6 +433,10 @@ async function newFolderTab(path = state.cwd || state.home) {
   renderFolderTabs();
   await navigate(path, false);
 }
+async function openFolderInNewTab(path) {
+  if (!path) return;
+  await newFolderTab(path);
+}
 async function switchFolderTab(id) {
   const tab = state.folderTabs.find((t) => t.id === id);
   if (!tab) return;
@@ -3254,6 +3258,7 @@ function showContextMenu(ev, e) {
   const items = [];
   if (e.isDir) items.push({ label: '打开', fn: () => navigate(e.path) });
   else items.push({ label: '预览', fn: () => { state.selected = e.path; openPreview(e); renderFiles(); } });
+  if (e.isDir) items.push({ label: '在新标签页打开', fn: () => openFolderInNewTab(e.path) });
   if (e.isDir) items.push({ label: '在新窗口打开', fn: () => openNewWindow(e.path) });
   if (e.isDir) items.push({ label: 'AI 整理…', fn: () => organizeLaunch(e.path) });
   if (e.isDir) items.push({ label: '磁盘占用透视', fn: () => diskPanel(e.path) });
@@ -3338,6 +3343,7 @@ function blankContextItems(shiftKey = false) {
   blank.push({ sep: true });
   blank.push({ label: '复制当前文件夹路径', fn: () => copyPaths([state.cwd]) });
   if (shiftKey) blank.push({ label: '复制当前文件夹为路径', fn: () => copyPathsQuoted([state.cwd]) });
+  blank.push({ label: '在新标签页打开当前文件夹', fn: () => openFolderInNewTab(state.cwd) });
   blank.push({ label: '在新窗口打开当前文件夹', fn: () => openNewWindow(state.cwd) });
   blank.push({ label: '在文件管理器中显示当前文件夹', fn: () => openWith(state.cwd, 'reveal') });
   blank.push({ label: '在终端打开当前文件夹', fn: () => term.openInDir(state.cwd) });
