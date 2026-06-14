@@ -317,20 +317,39 @@ app.on('window-all-closed', () => {
 });
 
 // ---------- 终端 IPC（node-pty）----------
+function terminalShellConfig(cwd) {
+  const isWin = process.platform === 'win32';
+  const startCwd = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
+  // GUI 启动的 app 不继承 shell 的 locale；终端显式固定 UTF-8，避免中文路径/输出乱码。
+  const env = {
+    ...process.env,
+    TERM: 'xterm-256color',
+    FANBOX: '1',
+    PYTHONUTF8: '1',
+    PYTHONIOENCODING: 'utf-8',
+    LESSCHARSET: 'utf-8',
+  };
+  if (!isWin && !/UTF-8/i.test(env.LC_ALL || env.LC_CTYPE || env.LANG || '')) env.LANG = 'zh_CN.UTF-8';
+  if (!isWin) return { shellPath: process.env.SHELL || '/bin/zsh', shellArgs: [], cwd: startCwd, env };
+  const utf8Bootstrap = [
+    '[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)',
+    '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)',
+    '$OutputEncoding = [Text.UTF8Encoding]::new($false)',
+    'chcp.com 65001 > $null',
+  ].join('; ');
+  return {
+    shellPath: 'powershell.exe',
+    shellArgs: ['-NoLogo', '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', utf8Bootstrap],
+    cwd: startCwd,
+    env,
+  };
+}
 ipcMain.handle('pty:spawn', (e, { id, cwd, cols, rows }) => {
   if (!pty) return { ok: false, error: 'node-pty 未编译，跑：npm run rebuild' };
-  const isWin = process.platform === 'win32';
-  // Windows 上 SHELL 变量通常不存在；优先 PowerShell（agent 体验好于 cmd），ConPTY 原生支持 UTF-8
-  const shellPath = isWin
-    ? 'powershell.exe'
-    : (process.env.SHELL || '/bin/zsh');
-  const startCwd = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
-  // GUI 启动的 app 不继承 shell 的 locale，zsh 会把中文路径按字节转义成 \M-^@ 乱码 → 兜底 UTF-8
-  const env = { ...process.env, TERM: 'xterm-256color', FANBOX: '1' };
-  if (!isWin && !/UTF-8/i.test(env.LC_ALL || env.LC_CTYPE || env.LANG || '')) env.LANG = 'zh_CN.UTF-8';
+  const { shellPath, shellArgs, cwd: startCwd, env } = terminalShellConfig(cwd);
   let p;
   try {
-    p = pty.spawn(shellPath, [], {
+    p = pty.spawn(shellPath, shellArgs, {
       name: 'xterm-256color',
       cols: cols || 80,
       rows: rows || 24,
