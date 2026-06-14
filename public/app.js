@@ -213,7 +213,7 @@ const state = {
   selectionAnchor: null, // Shift+键盘/点击范围选择的固定锚点路径
   fileClip: null, fileClipSet: new Set(), // 文件剪贴板 {op:'copy'|'cut', paths:[]}; fileClipSet 只缓存剪切项用于淡化标记
   undoStack: [], redoStack: [], // 资源管理器同款 Ctrl+Z/Ctrl+Y：轻量撤销/重做最近文件操作
-  folderTabs: [], activeFolderTab: null, folderTabSeq: 0, // Windows 11 Explorer 式文件夹标签页
+  folderTabs: [], activeFolderTab: null, folderTabSeq: 0, closedFolderTabs: [], // Windows 11 Explorer 式文件夹标签页
   favorites: [], recentOpened: [], recentMode: false, skillsMode: false,
   previewW: Number(localStorage.getItem('fb_preview_w')) || 480,
   previewH: Number(localStorage.getItem('fb_preview_h')) || 340,
@@ -385,6 +385,12 @@ function renderFolderTabs() {
     button.setAttribute('aria-selected', tab.id === state.activeFolderTab ? 'true' : 'false');
     button.tabIndex = 0;
     button.onclick = () => switchFolderTab(tab.id);
+    button.onmousedown = (ev) => {
+      if (ev.button === 1) { ev.preventDefault(); closeFolderTab(tab.id); }
+    };
+    button.onauxclick = (ev) => {
+      if (ev.button === 1) { ev.preventDefault(); closeFolderTab(tab.id); }
+    };
     button.onkeydown = (ev) => {
       if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); switchFolderTab(tab.id); }
     };
@@ -422,14 +428,25 @@ async function closeFolderTab(id) {
   const idx = state.folderTabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
   if (state.folderTabs.length <= 1) { closeCurrentWindow(); return; }
-  const wasActive = state.folderTabs[idx].id === state.activeFolderTab;
+  const closed = state.folderTabs[idx];
+  const wasActive = closed.id === state.activeFolderTab;
   state.folderTabs.splice(idx, 1);
+  state.closedFolderTabs.push({ path: closed.path, title: closed.title });
   if (wasActive) {
     const next = state.folderTabs[Math.min(idx, state.folderTabs.length - 1)];
     await switchFolderTab(next.id);
   } else {
     renderFolderTabs();
   }
+}
+async function restoreClosedFolderTab() {
+  const closed = state.closedFolderTabs.pop();
+  if (!closed || !closed.path) return;
+  const tab = { id: 'tab-' + (++state.folderTabSeq), path: closed.path, title: closed.title || folderTabTitle(closed.path) };
+  state.folderTabs.push(tab);
+  state.activeFolderTab = tab.id;
+  renderFolderTabs();
+  await navigate(tab.path, false);
 }
 function stepFolderTab(direction) {
   if (state.folderTabs.length < 2) return;
@@ -3995,6 +4012,7 @@ function bindEvents() {
     if (!inInput && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) { e.preventDefault(); openKeyboardContextMenu(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key === '[') { e.preventDefault(); goBack(); return; }
     if (!inInput && mod && e.key === 'Tab') { e.preventDefault(); stepFolderTab(e.shiftKey ? -1 : 1); return; }
+    if (!inInput && mod && e.shiftKey && !e.altKey && (e.key === 't' || e.key === 'T')) { e.preventDefault(); restoreClosedFolderTab(); return; }
     if (!inInput && mod && !e.shiftKey && !e.altKey && (e.key === 't' || e.key === 'T')) { e.preventDefault(); newFolderTab(); return; }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'w' || e.key === 'W') && !inInput) { e.preventDefault(); closeFolderTab(state.activeFolderTab); return; }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B') && !inInput) { e.preventDefault(); toggleSidebar(); return; }
