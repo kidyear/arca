@@ -591,6 +591,14 @@ function goBackspace() {
 function isEditingTarget(el) {
   return !!(el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable || el.closest?.('[contenteditable="true"]')));
 }
+function toggleHiddenFiles(next) {
+  state.showHidden = typeof next === 'boolean' ? next : !state.showHidden;
+  localStorage.setItem('fb_hidden', state.showHidden ? '1' : '0');
+  const cb = $('#toggle-hidden');
+  if (cb) cb.checked = state.showHidden;
+  renderFiles();
+  toast(state.showHidden ? '已显示隐藏文件' : '已隐藏隐藏文件');
+}
 function handleMouseHistoryButton(ev) {
   if (ev.button !== 3 && ev.button !== 4) return;
   if (isEditingTarget(ev.target)) return;
@@ -4041,7 +4049,7 @@ function bindEvents() {
   $('#scope-toggle').onclick = () => cmdk.toggleScope();
 
   $('#toggle-hidden').checked = state.showHidden;
-  $('#toggle-hidden').onchange = (e) => { state.showHidden = e.target.checked; localStorage.setItem('fb_hidden', state.showHidden ? '1' : '0'); renderFiles(); };
+  $('#toggle-hidden').onchange = (e) => toggleHiddenFiles(e.target.checked);
   $('#file-filter').oninput = (e) => setFileFilter(e.target.value);
   $('#file-filter').addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -4106,6 +4114,7 @@ function bindEvents() {
     if (!inInput && (e.key === 'BrowserForward' || e.key === 'GoForward')) { e.preventDefault(); goForward(); return; }
     if (!inInput && e.key === 'F3') { e.preventDefault(); focusFileFilter(); return; }
     if (!inInput && mod && e.shiftKey && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); locateCurrentInSidebar(); return; }
+    if (!inInput && mod && e.shiftKey && !e.altKey && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleHiddenFiles(); return; }
     if (!inInput && mod && !e.shiftKey && ['f', 'F', 'e', 'E'].includes(e.key)) { e.preventDefault(); focusFileFilter(); return; }
     if (!inInput && ((e.ctrlKey && (e.key === 'l' || e.key === 'L')) || (e.altKey && (e.key === 'd' || e.key === 'D')) || e.key === 'F4')) {
       e.preventDefault(); beginAddressEdit(); return;
