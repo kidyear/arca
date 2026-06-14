@@ -390,6 +390,9 @@ function renderFolderTabs() {
   if (!host) return;
   if (!state.folderTabs.length && state.cwd) ensureFolderTabForCwd(state.cwd);
   host.innerHTML = '';
+  host.ondblclick = (ev) => {
+    if (ev.target === host) newFolderTab();
+  };
   state.folderTabs.forEach((tab) => {
     const button = document.createElement('div');
     button.className = 'folder-tab' + (tab.id === state.activeFolderTab ? ' active' : '');
@@ -438,6 +441,14 @@ function renderFolderTabs() {
     button.append(label, close);
     host.appendChild(button);
   });
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'folder-tab-new';
+  add.title = '新建标签页';
+  add.setAttribute('aria-label', '新建标签页');
+  add.textContent = '+';
+  add.onclick = (ev) => { ev.stopPropagation(); newFolderTab(); };
+  host.appendChild(add);
   const active = host.querySelector('.folder-tab.active');
   if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }

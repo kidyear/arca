@@ -218,6 +218,11 @@ kbd {
   background: transparent; color: var(--text-faint); cursor: pointer; line-height: 17px; font-size: 12px;
 }
 .folder-tab-close:hover { background: var(--bg-3); color: var(--text); }
+.folder-tab-new {
+  flex: 0 0 28px; width: 28px; height: 28px; margin-bottom: 1px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--text-dim); cursor: pointer; font: inherit; font-size: 18px; line-height: 1;
+}
+.folder-tab-new:hover { background: var(--bg-3); color: var(--text); border-color: var(--border); }
 #topbar {
   display: flex; align-items: center; gap: 12px; padding: 10px 16px;
   border-bottom: 1px solid var(--border); background: var(--bg-2);
