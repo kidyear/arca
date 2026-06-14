@@ -1417,6 +1417,49 @@ $lnk.Save()
   });
 }
 
+async function resolveShortcutTarget(shortcutPath) {
+  if (PLATFORM !== 'win32') return { ok: false, error: '快捷方式目标解析仅支持 Windows' };
+  const shortcut = resolvePath(shortcutPath);
+  if (path.extname(shortcut).toLowerCase() !== '.lnk') return { ok: false, error: '仅支持 .lnk 快捷方式' };
+  let st;
+  try { st = await fsp.stat(shortcut); } catch { return { ok: false, error: '快捷方式不存在' }; }
+  if (st.isDirectory()) return { ok: false, error: '目标不是快捷方式文件' };
+  const script = `& {
+$ErrorActionPreference = 'Stop'
+$shell = New-Object -ComObject WScript.Shell
+$lnk = $shell.CreateShortcut($env:FANBOX_SHORTCUT_PATH)
+$target = [string]$lnk.TargetPath
+$workdir = [string]$lnk.WorkingDirectory
+$args = [string]$lnk.Arguments
+$exists = $false
+$isDir = $false
+if ($target) {
+  try {
+    $item = Get-Item -LiteralPath $target -Force
+    $exists = $true
+    $isDir = [bool]($item.PSIsContainer)
+  } catch {
+    $exists = $false
+  }
+}
+[pscustomobject]@{
+  ok = $true
+  path = $env:FANBOX_SHORTCUT_PATH
+  name = [System.IO.Path]::GetFileName($env:FANBOX_SHORTCUT_PATH)
+  target = $target
+  workingDirectory = $workdir
+  arguments = $args
+  exists = $exists
+  isDir = $isDir
+} | ConvertTo-Json -Compress
+}`;
+  return execPowerShellJson(script, [], {
+    env: {
+      FANBOX_SHORTCUT_PATH: shortcut,
+    },
+  });
+}
+
 // 终端里点文件名 → 定位真实文件：直接 stat → 用 tail 做「空格扩展」逐候选 stat
 // → scrollback 回扫候选（alt）逐个 stat → 多根 basename 搜索。
 // 空格扩展：前端对带空格的文件名（macOS 截屏等）只能保守匹配到第一个空格，真实边界
@@ -2588,6 +2631,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/shortcut' && req.method === 'POST') {
       const b = await readBody(req);
       return sendJSON(res, 200, await createShortcut(b.path, b.dstDir));
+    }
+    if (p === '/api/shortcut/target' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await resolveShortcutTarget(b.path));
     }
     if (p === '/api/agent-projects') {
       return sendJSON(res, 200, await agentProjects());

@@ -1785,7 +1785,12 @@ function onItemClick(e) {
   applySelection(e.path);
   if (previewVisible() && !samePreviewed) previewEntry(e);
 }
-function onItemOpen(e) { if (e.isDrive) navigate(e.path); else if (e.isDir) navigate(e.path); else openWith(e.path, 'default'); }
+function onItemOpen(e) {
+  if (e.isDrive) navigate(e.path);
+  else if (e.isDir) navigate(e.path);
+  else if (e.kind === 'shortcut') openShortcutTarget(e);
+  else openWith(e.path, 'default');
+}
 
 // ---------- 主区键盘导航 ----------
 function highlightCursor(force = false) {
@@ -2565,6 +2570,30 @@ async function openWith(p, withApp) {
     else toast('已打开');
     loadFavorites();
   } else toast('打开失败：' + (r.error || ''), true);
+}
+async function shortcutTargetInfo(e) {
+  const r = await apiPost('/api/shortcut/target', { path: e.path }).catch((err) => ({ ok: false, error: err.message }));
+  if (!r.ok || !r.target) throw new Error(r.error || '未找到快捷方式目标');
+  return r;
+}
+async function openShortcutTarget(e) {
+  try {
+    const r = await shortcutTargetInfo(e);
+    if (!r.exists) { toast('快捷方式目标不存在：' + r.target, true); return; }
+    if (r.isDir) { await navigate(r.target); toast('已打开快捷方式目标'); return; }
+    await openWith(r.target, 'default');
+  } catch (err) {
+    toast('打开快捷方式失败：' + (err.message || err), true);
+  }
+}
+async function revealShortcutTarget(e) {
+  try {
+    const r = await shortcutTargetInfo(e);
+    if (!r.exists) { toast('快捷方式目标不存在：' + r.target, true); return; }
+    await revealEntryInCurrentApp({ path: r.target });
+  } catch (err) {
+    toast('打开目标位置失败：' + (err.message || err), true);
+  }
 }
 async function copyPath(p) {
   return copyPaths([p]);
@@ -3495,6 +3524,7 @@ function propertiesPanel(items) {
       ] : []),
       ['修改时间', fmtDateTime(single.mtime)],
       ['创建时间', fmtDateTime(single.btime)],
+      ...(single.kind === 'shortcut' ? [['目标路径', '读取中…']] : []),
       ['完整路径', single.path],
     ]
     : [
@@ -3506,10 +3536,28 @@ function propertiesPanel(items) {
   ov.className = 'input-overlay prop-overlay';
   ov.innerHTML = `<div class="input-dialog prop-dialog">
     <div class="input-title">${single ? escapeHtml(single.name) : `所选 ${items.length} 项`}</div>
-    <div class="prop-rows">${rows.map(([k, v]) => `<div class="prop-row"><span>${escapeHtml(k)}</span><code title="${escapeHtml(v)}">${escapeHtml(v)}</code></div>`).join('')}</div>
+    <div class="prop-rows">${rows.map(([k, v]) => `<div class="prop-row" data-prop-key="${escapeHtml(k)}"><span>${escapeHtml(k)}</span><code title="${escapeHtml(v)}">${escapeHtml(v)}</code></div>`).join('')}</div>
     <div class="input-actions"><button class="ghost-btn" id="prop-copy">复制路径</button>${single && single.isDir ? '<button class="ghost-btn" id="prop-du">占用透视</button>' : ''}<button class="primary" id="prop-ok">确定</button></div>
   </div>`;
   document.body.appendChild(ov);
+  if (single && single.kind === 'shortcut') {
+    shortcutTargetInfo(single).then((r) => {
+      const row = ov.querySelector('.prop-row[data-prop-key="目标路径"]');
+      const code = row && row.querySelector('code');
+      if (!code) return;
+      const value = r.target ? (r.exists ? r.target : `${r.target}（不存在）`) : '未设置';
+      code.textContent = value;
+      code.title = value;
+    }).catch((err) => {
+      const row = ov.querySelector('.prop-row[data-prop-key="目标路径"]');
+      const code = row && row.querySelector('code');
+      if (code) {
+        const value = '读取失败：' + (err.message || err);
+        code.textContent = value;
+        code.title = value;
+      }
+    });
+  }
   const onKey = (ev) => { if (ev.key === 'Escape' || ev.key === 'Enter') { ev.preventDefault(); close(); } };
   const close = () => { ov.remove(); document.removeEventListener('keydown', onKey, true); };
   document.addEventListener('keydown', onKey, true);
@@ -3622,8 +3670,10 @@ function showContextMenu(ev, e) {
   }
   if (state.multiSel.size && !state.multiSel.has(e.path)) applySelection(e.path);
   const items = [];
-  if (e.isDir) items.push({ label: '打开', fn: () => navigate(e.path) });
+  if (e.kind === 'shortcut') items.push({ label: '打开', fn: () => openShortcutTarget(e) });
+  else if (e.isDir) items.push({ label: '打开', fn: () => navigate(e.path) });
   else items.push({ label: '预览', fn: () => { state.selected = e.path; openPreview(e); renderFiles(); } });
+  if (e.kind === 'shortcut') items.push({ label: '打开目标位置', fn: () => revealShortcutTarget(e) });
   if (state.searchMode || state.recentMode) items.push({ label: '打开所在位置', fn: () => revealEntryInCurrentApp(e) });
   if (e.isDir) items.push({ label: '在新标签页打开', fn: () => openFolderInNewTab(e.path) });
   if (e.isDir) items.push({ label: '在新窗口打开', fn: () => openNewWindow(e.path) });

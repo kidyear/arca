@@ -80,6 +80,8 @@ window.FANBOX_DICT = {
   '移到废纸篓': 'Move to Trash',
   '创建快捷方式': 'Create shortcut',
   '快捷方式': 'Shortcut',
+  '打开目标位置': 'Open target location',
+  '目标路径': 'Target path',
   '新建文件夹…': 'New folder…',
   '新建文件…': 'New file…',
 
@@ -391,6 +393,8 @@ window.FANBOX_DICT_RULES = [
   // 错误前缀类
   [/^无法打开：([\s\S]*)$/, (m) => `Can't open: ${m[1]}`],
   [/^打开失败：([\s\S]*)$/, (m) => `Open failed: ${m[1]}`],
+  [/^打开快捷方式失败：([\s\S]*)$/, (m) => `Open shortcut failed: ${m[1]}`],
+  [/^打开目标位置失败：([\s\S]*)$/, (m) => `Open target location failed: ${m[1]}`],
   [/^保存失败：([\s\S]*)$/, (m) => `Save failed: ${m[1]}`],
   [/^重命名失败：([\s\S]*)$/, (m) => `Rename failed: ${m[1]}`],
   [/^新建失败：([\s\S]*)$/, (m) => `Create failed: ${m[1]}`],
@@ -403,6 +407,8 @@ window.FANBOX_DICT_RULES = [
   [/^复制失败（浏览器限制），路径：([\s\S]+)$/, (m) => `Copy failed (browser limitation). Path: ${m[1]}`],
   // 文件操作
   [/^已另存为 (.+)$/, (m) => `Saved as ${m[1]}`],
+  [/^快捷方式目标不存在：([\s\S]*)$/, (m) => `Shortcut target is missing: ${m[1]}`],
+  [/^已打开快捷方式目标$/, () => 'Opened shortcut target'],
   [/^创建 (\d+) 个快捷方式$/, (m) => `Create ${m[1]} shortcuts`],
   [/^已创建 (\d+) 个快捷方式$/, (m) => `Created ${m[1]} shortcuts`],
   [/^已创建 (\d+) 个快捷方式，(\d+) 项失败$/, (m) => `Created ${m[1]} shortcuts, ${m[2]} failed`],
