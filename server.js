@@ -93,7 +93,22 @@ function kindOf(name, isDir) {
 function resolvePath(p) {
   if (!p || typeof p !== 'string') return HOME;
   if (p.includes('\0')) throw new Error('非法路径');
-  let abs = p.startsWith('~') ? path.join(HOME, p.slice(1)) : p;
+  let input = p.trim();
+  if ((input.startsWith('"') && input.endsWith('"')) || (input.startsWith("'") && input.endsWith("'"))) {
+    input = input.slice(1, -1).trim();
+  }
+  if (/^file:/i.test(input)) {
+    try {
+      input = decodeURIComponent(new URL(input).pathname);
+      if (PLATFORM === 'win32') input = input.replace(/^\/+(?=[A-Za-z]:)/, '');
+    } catch {
+      // 不是合法 file URL 时继续按普通路径处理，保持原错误反馈。
+    }
+  }
+  if (PLATFORM === 'win32') {
+    input = input.replace(/%([^%\\/]+)%/g, (m, key) => process.env[key] || process.env[key.toUpperCase()] || m);
+  }
+  let abs = input.startsWith('~') ? path.join(HOME, input.slice(1)) : input;
   if (!path.isAbsolute(abs)) abs = path.join(HOME, abs);
   return path.normalize(abs);
 }
@@ -199,6 +214,24 @@ async function listDir(dirPath) {
     breadcrumb.push({ name: parts[i], path: acc });
   }
   return { path: dir, parent: path.dirname(dir), entries, breadcrumb, project };
+}
+
+async function statPath(p) {
+  const real = resolvePath(p);
+  const st = await fsp.lstat(real);
+  const isDir = st.isDirectory();
+  const name = path.basename(real) || real;
+  return {
+    ok: true,
+    path: real,
+    name,
+    isDir,
+    kind: kindOf(name, isDir),
+    hidden: name.startsWith('.'),
+    size: isDir ? 0 : st.size,
+    mtime: st.mtimeMs,
+    btime: st.birthtimeMs || 0,
+  };
 }
 
 async function readFile(filePath) {
@@ -466,6 +499,20 @@ function trashPath(p) {
       resolve({ ok: false, error: msg });
     });
   });
+}
+
+async function deletePathPermanent(p) {
+  let target;
+  try { target = resolvePath(p); } catch { return { ok: false, error: '非法路径' }; }
+  let st;
+  try { st = await fsp.lstat(target); } catch { return { ok: false, error: '文件不存在' }; }
+  if (path.resolve(target) === path.parse(path.resolve(target)).root) return { ok: false, error: '不能删除磁盘根目录' };
+  try {
+    await fsp.rm(target, { recursive: st.isDirectory(), force: false, maxRetries: 3, retryDelay: 120 });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 function validName(name) {
@@ -924,14 +971,101 @@ async function archiveList(p) {
   return { ok: true, entries: entries.slice(0, MAX), truncated };
 }
 
+function uniqueFsPath(target) {
+  let dst = target;
+  const ex = path.extname(dst);
+  const base = path.basename(dst, ex);
+  const dir = path.dirname(dst);
+  let i = 2;
+  while (fs.existsSync(dst)) dst = path.join(dir, `${base}-${i++}${ex}`);
+  return dst;
+}
+
+function runArchivePowerShell(script, env, timeout = 120000) {
+  return new Promise((resolve) => {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+      timeout,
+      maxBuffer: 8 * 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, ...env },
+    }, (err, stdout, stderr) => resolve({ ok: !err, error: err ? String(stderr || stdout || err.message).trim() : '' }));
+  });
+}
+
+async function extractArchive(p) {
+  const file = resolvePath(p);
+  let st; try { st = await fsp.stat(file); } catch { return { ok: false, error: '文件不存在' }; }
+  if (st.isDirectory()) return { ok: false, error: '文件夹不能解压' };
+  const name = path.basename(file);
+  if (!/\.(zip|jar)$/i.test(name)) return { ok: false, error: '当前只支持解压 zip/jar' };
+  const dst = uniqueFsPath(path.join(path.dirname(file), name.replace(/\.(zip|jar)$/i, '') || '解压内容'));
+  await fsp.mkdir(dst, { recursive: true });
+  let r;
+  if (PLATFORM === 'win32') {
+    r = await runArchivePowerShell(
+      "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:FANBOX_ARCHIVE -DestinationPath $env:FANBOX_ARCHIVE_DEST -Force",
+      { FANBOX_ARCHIVE: file, FANBOX_ARCHIVE_DEST: dst }
+    );
+  } else {
+    r = await new Promise((resolve) => {
+      execFile('unzip', ['-q', file, '-d', dst], { timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => resolve({ ok: !err, error: err ? String(stderr || stdout || err.message).trim() : '' }));
+    });
+  }
+  if (!r.ok) {
+    await fsp.rm(dst, { recursive: true, force: true }).catch(() => {});
+    return { ok: false, error: r.error || '解压失败' };
+  }
+  return { ok: true, path: dst, name: path.basename(dst), isDir: true };
+}
+
+async function createZip(paths, dstDir, name) {
+  const list = [...new Set((paths || []).filter(Boolean).map(resolvePath))];
+  if (!list.length) return { ok: false, error: '没有可压缩的项目' };
+  for (const p of list) {
+    try { await fsp.stat(p); } catch { return { ok: false, error: `不存在：${p}` }; }
+  }
+  const dir = resolvePath(dstDir || path.dirname(list[0]));
+  await fsp.mkdir(dir, { recursive: true });
+  let zipName = (name || '').trim();
+  if (!zipName) zipName = list.length === 1 ? `${path.basename(list[0])}.zip` : '压缩包.zip';
+  if (!zipName.toLowerCase().endsWith('.zip')) zipName += '.zip';
+  if (!validName(zipName)) return { ok: false, error: '压缩包名称不合法' };
+  const dst = uniqueFsPath(path.join(dir, zipName));
+  let r;
+  if (PLATFORM === 'win32') {
+    r = await runArchivePowerShell(
+      "$ErrorActionPreference='Stop'; $paths=$env:FANBOX_ZIP_PATHS -split \"`n\" | Where-Object { $_ }; Compress-Archive -LiteralPath $paths -DestinationPath $env:FANBOX_ZIP_DEST -Force",
+      { FANBOX_ZIP_PATHS: list.join('\n'), FANBOX_ZIP_DEST: dst }
+    );
+  } else {
+    const cwd = path.dirname(list[0]);
+    const args = ['-a', '-cf', dst, ...list.map((p) => path.relative(cwd, p) || path.basename(p))];
+    r = await new Promise((resolve) => {
+      execFile('zip', ['-qry', dst, ...list.map((p) => path.relative(cwd, p) || path.basename(p))], { cwd, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (!err) resolve({ ok: true, error: '' });
+        else execFile('tar', args, { cwd, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err2, stdout2, stderr2) => resolve({ ok: !err2, error: err2 ? String(stderr2 || stdout2 || err2.message).trim() : '' }));
+      });
+    });
+  }
+  if (!r.ok) {
+    await fsp.rm(dst, { force: true }).catch(() => {});
+    return { ok: false, error: r.error || '压缩失败' };
+  }
+  const st = await fsp.stat(dst).catch(() => null);
+  return { ok: true, path: dst, name: path.basename(dst), size: st ? st.size : 0 };
+}
+
 // 复制文件/文件夹到目标目录（拖拽收文件用，源不动）；同名自动加序号防覆盖
 async function copyInPath(src, dstDir) {
   const s = resolvePath(src), d = resolvePath(dstDir);
   let st; try { st = await fsp.stat(s); } catch { return { ok: false, error: '源文件不存在' }; }
   await fsp.mkdir(d, { recursive: true });
+  const srcResolved = path.resolve(s);
+  const dstDirResolved = path.resolve(d);
+  if (st.isDirectory() && (dstDirResolved === srcResolved || dstDirResolved.startsWith(srcResolved + path.sep))) {
+    return { ok: false, error: '不能把文件夹复制进它自己' };
+  }
   let dst = path.join(d, path.basename(s));
-  if (path.resolve(dst) === path.resolve(s)) return { ok: false, error: '源和目标是同一位置' };
-  if (st.isDirectory() && path.resolve(d).startsWith(path.resolve(s) + path.sep)) return { ok: false, error: '不能把文件夹复制进它自己' };
   if (fs.existsSync(dst)) {
     const ex = st.isDirectory() ? '' : path.extname(dst);
     const base = path.basename(dst, ex);
@@ -1989,6 +2123,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/list') {
       return sendJSON(res, 200, await listDir(qp.get('path') || HOME));
     }
+    if (p === '/api/stat') {
+      try { return sendJSON(res, 200, await statPath(qp.get('path') || HOME)); }
+      catch (e) { return sendJSON(res, 200, { ok: false, error: e.message }); }
+    }
     if (p === '/api/read') {
       return sendJSON(res, 200, await readFile(qp.get('path')));
     }
@@ -2062,6 +2200,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/archive') {
       return sendJSON(res, 200, await archiveList(url.searchParams.get('path')));
     }
+    if (p === '/api/archive/extract' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await extractArchive(b.path));
+    }
+    if (p === '/api/archive/create-zip' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await createZip(b.paths, b.dstDir, b.name));
+    }
     if (p === '/api/du') {
       return sendJSON(res, 200, await diskUsage(url.searchParams.get('path')));
     }
@@ -2086,6 +2232,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/trash' && req.method === 'POST') {
       const b = await readBody(req);
       return sendJSON(res, 200, await trashPath(b.path));
+    }
+    if (p === '/api/delete' && req.method === 'POST') {
+      const b = await readBody(req);
+      return sendJSON(res, 200, await deletePathPermanent(b.path));
     }
     if (p === '/api/move' && req.method === 'POST') {
       const b = await readBody(req);

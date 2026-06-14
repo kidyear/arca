@@ -23,8 +23,11 @@ contextBridge.exposeInMainWorld('fanboxFs', {
 });
 
 contextBridge.exposeInMainWorld('fanboxClipboard', {
+  copyText: (text) => ipcRenderer.invoke('clip:text', { text }),
   copyImage: (path) => ipcRenderer.invoke('clip:image', { path }),
   copyFile: (path) => ipcRenderer.invoke('clip:file', { path }),
+  copyFiles: (paths, op) => ipcRenderer.invoke('clip:files', { paths, op }),
+  readFiles: () => ipcRenderer.invoke('clip:read-files'),
 });
 
 contextBridge.exposeInMainWorld('fanboxDrop', {
@@ -32,6 +35,10 @@ contextBridge.exposeInMainWorld('fanboxDrop', {
   pathForFile: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
   // file-promise 类拖拽（如 macOS 截图浮窗缩略图）没有现成路径：把内容落盘到临时目录换一个路径
   saveTemp: (name, buf) => ipcRenderer.invoke('drop:save', { name, buf }),
+});
+
+contextBridge.exposeInMainWorld('fanboxDrag', {
+  start: (paths) => ipcRenderer.send('drag:start', { paths }),
 });
 
 contextBridge.exposeInMainWorld('fanboxShot', {
@@ -43,6 +50,11 @@ contextBridge.exposeInMainWorld('fanboxUpdate', {
   onAvailable: (cb) => { const h = (e, m) => cb(m); ipcRenderer.on('update:available', h); return () => ipcRenderer.removeListener('update:available', h); },
   get: () => ipcRenderer.invoke('update:get'), // 拉一把启动早期可能错过的推送
   open: (url) => ipcRenderer.invoke('update:open', { url }),
+});
+
+contextBridge.exposeInMainWorld('fanboxWindow', {
+  open: (path) => ipcRenderer.invoke('window:new', { path }),
+  close: () => ipcRenderer.invoke('window:close'),
 });
 
 contextBridge.exposeInMainWorld('fanboxEnv', {

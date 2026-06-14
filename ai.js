@@ -495,7 +495,7 @@ module.exports = function createAI(ctx) {
               pendingApprovals.set(id, done);
               if (signal) signal.addEventListener('abort', () => done(false), { once: true });
             });
-            send({ type: 'approval_done', name: toolName, ok });
+            send({ type: 'approval_done', id, name: toolName, ok });
             return ok ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: '用户拒绝了这次操作，请换个方式或询问用户' };
           },
         },
