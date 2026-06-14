@@ -11,6 +11,20 @@
 
 ## [Unreleased]
 
+## [1.0.18] - 2026-06-14
+
+### Added
+- Windows 普通删除优先进入系统回收站，并继续接入 Ctrl+Z / Ctrl+Y 撤销重做链路；系统回收站不可用时回退到 Arca 自有可恢复暂存区。
+- 内嵌 PowerShell 终端固定 UTF-8 输入/输出编码，并让 Python、less 等子进程继承 UTF-8 环境，减少中文目录和中文输出乱码。
+
+### Fixed
+- Windows 图片缩略图现在会按缓存格式真实输出：PNG/GIF/WebP/AVIF 等可能透明图片保存为真实 PNG，普通图片保存为 JPEG，避免 Content-Type、扩展名和实际编码不一致。
+
+### Verified
+- `node --check` 覆盖 `server.js`、`public/app.js`、`electron/main.js` 与新增契约脚本。
+- 全部 `scripts/check-*.js` 契约脚本通过。
+- Windows 真机 API E2E 验证系统回收站删除/恢复、中文 PowerShell node-pty 输出，以及中文路径 PNG 缩略图返回真实 `image/png`。
+
 ## [1.0.17] - 2026-06-14
 
 ### Added
