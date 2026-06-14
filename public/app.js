@@ -735,6 +735,7 @@ function renderBreadcrumb() {
     else el.textContent = c.name;
     el.dataset.path = c.path;
     el.onclick = () => navigate(c.path);
+    el.oncontextmenu = (ev) => showBreadcrumbContextMenu(ev, c);
     el.addEventListener('dragover', (ev) => {
       const t = ev.dataTransfer.types;
       if ((!isInternalDrag(ev.dataTransfer) && !t.includes('Files')) || state.skillsMode || state.recentMode) return;
@@ -3703,6 +3704,29 @@ function showContextMenu(ev, e) {
   items.push({ label: '永久删除', danger: true, fn: () => doDeletePermanent(e) });
   popupMenu(ev, items);
 }
+function breadcrumbContextItems(crumb, shiftKey = false) {
+  const items = [
+    { label: '打开', fn: () => navigate(crumb.path) },
+    { label: '在新标签页打开', fn: () => openFolderInNewTab(crumb.path) },
+    { label: '在新窗口打开', fn: () => openNewWindow(crumb.path) },
+    { sep: true },
+    { label: '复制路径', fn: () => copyPaths([crumb.path]) },
+  ];
+  if (shiftKey) items.push({ label: '复制为路径', fn: () => copyPathsQuoted([crumb.path]) });
+  items.push(
+    { label: '在文件管理器中显示', fn: () => openWith(crumb.path, 'reveal') },
+    { label: '在终端打开', fn: () => term.openInDir(crumb.path) },
+    { sep: true },
+    { label: isFav(crumb.path) ? '取消收藏' : '收藏', fn: () => toggleFav({ path: crumb.path, name: crumb.name || baseOf(crumb.path), isDir: true }) },
+    { label: '属性', fn: async () => propertiesPanel([await folderEntryForPathFresh(crumb.path)]) },
+  );
+  return items;
+}
+function showBreadcrumbContextMenu(ev, crumb) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  popupMenu(ev, breadcrumbContextItems(crumb, ev.shiftKey));
+}
 // 在鼠标位置弹一个菜单（右键菜单与空白处双击菜单共用）
 function popupMenu(ev, items) {
   closeContextMenu();
@@ -3742,6 +3766,18 @@ function currentFolderEntry() {
     mtime: 0,
     btime: 0,
   };
+}
+function folderEntryForPathFresh(p) {
+  const fallback = {
+    path: p,
+    name: baseOf(p) || p,
+    isDir: true,
+    kind: 'folder',
+    size: 0,
+    mtime: 0,
+    btime: 0,
+  };
+  return api('/api/stat?path=' + encodeURIComponent(p)).then((r) => ((r && r.ok) ? r : fallback)).catch(() => fallback);
 }
 async function currentFolderEntryFresh() {
   const fallback = currentFolderEntry();

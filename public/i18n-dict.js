@@ -65,6 +65,8 @@ window.FANBOX_DICT = {
   // ---------- 右键菜单 ----------
   '打开': 'Open',
   '预览': 'Preview',
+  '在新标签页打开': 'Open in new tab',
+  '在新窗口打开': 'Open in new window',
   'AI 整理…': 'Organize with AI…',
   '磁盘占用透视': 'Disk usage',
   '在终端打开': 'Open in Terminal',
@@ -74,7 +76,9 @@ window.FANBOX_DICT = {
   '在编辑器打开': 'Open in editor',
   '在 Finder 显示': 'Reveal in Finder',
   '在访达显示': 'Reveal in Finder',
+  '在文件管理器中显示': 'Reveal in file manager',
   '复制路径': 'Copy path',
+  '复制为路径': 'Copy as path',
   '取消收藏': 'Unfavorite',
   '重命名…': 'Rename…',
   '移到废纸篓': 'Move to Trash',
