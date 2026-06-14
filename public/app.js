@@ -183,7 +183,7 @@ function richIcon(e, size) {
 window.__svgImg = richIcon({ name: '_.jpg', kind: 'image' }, 40);
 window.__svgVideo = richIcon({ name: '_.mp4', kind: 'video' }, 40);
 
-const LIST_COL_DEFAULTS = { mtime: 130, kind: 112, size: 90 };
+const LIST_COL_DEFAULTS = { mtime: 130, btime: 130, kind: 112, size: 90 };
 function loadListCols() {
   try {
     const raw = JSON.parse(localStorage.getItem('fb_list_cols') || '{}');
@@ -700,6 +700,7 @@ function visibleEntries() {
   // 最近修改视图：以时间为本义，默认按 mtime 倒序（用户可显式切到大小/名称）
   if (state.recentMode && state.sort === 'name') list.sort((a, b) => byText(a, b));
   else if (state.sort === 'mtime') list.sort((a, b) => dirFirst(a, b) || byNum('mtime')(a, b));
+  else if (state.sort === 'btime') list.sort((a, b) => dirFirst(a, b) || byNum('btime')(a, b));
   else if (state.sort === 'size') list.sort((a, b) => dirFirst(a, b) || byNum('size')(a, b));
   else if (state.sort === 'kind') list.sort((a, b) => dirFirst(a, b) || byKind(a, b));
   else list.sort((a, b) => dirFirst(a, b) || byText(a, b));
@@ -712,7 +713,7 @@ function sortButtonLabel(sort, label) {
   return `<button class="list-sort ${active ? 'active' : ''}" data-sort="${sort}" aria-sort="${aria}" title="按${label}排序">${label}<span>${arrow}</span></button>`;
 }
 function setSort(sort, dir) {
-  if (!['name', 'mtime', 'kind', 'size'].includes(sort)) sort = 'name';
+  if (!['name', 'mtime', 'btime', 'kind', 'size'].includes(sort)) sort = 'name';
   const nextDir = dir || (state.sort === sort ? (state.sortDir === 'asc' ? 'desc' : 'asc') : defaultSortDir(sort));
   state.sort = sort;
   state.sortDir = nextDir === 'asc' ? 'asc' : 'desc';
@@ -741,6 +742,7 @@ function saveListCols() {
 }
 function listColText(col, e) {
   if (col === 'mtime') return fmtTime(e.mtime);
+  if (col === 'btime') return fmtTime(e.btime);
   if (col === 'kind') return kindLabel(e);
   if (col === 'size') return e.isDir ? '' : fmtSize(e.size);
   return '';
@@ -752,7 +754,7 @@ function autoFitListCol(col) {
   const canvas = autoFitListCol.canvas || (autoFitListCol.canvas = document.createElement('canvas'));
   const ctx = canvas.getContext('2d');
   ctx.font = `${st.fontStyle} ${st.fontWeight} ${st.fontSize} ${st.fontFamily}`;
-  const header = ({ mtime: '修改时间', kind: '类型', size: '大小' })[col] || '';
+  const header = ({ mtime: '修改时间', btime: '创建时间', kind: '类型', size: '大小' })[col] || '';
   let w = ctx.measureText(header).width + 34; // 排序箭头 + 拖拽热区
   for (const e of state.visible || []) {
     w = Math.max(w, ctx.measureText(listColText(col, e)).width + 18);
@@ -980,7 +982,7 @@ function renderFiles() {
     wrap.className = 'list';
     const head = document.createElement('div');
     head.className = 'row list-head';
-    head.innerHTML = `<div></div>${sortHeadCell('name', '名称')}${sortHeadCell('mtime', '修改时间', true)}${sortHeadCell('kind', '类型', true)}${sortHeadCell('size', '大小', true)}<div></div>`;
+    head.innerHTML = `<div></div>${sortHeadCell('name', '名称')}${sortHeadCell('mtime', '修改时间', true)}${sortHeadCell('btime', '创建时间', true)}${sortHeadCell('kind', '类型', true)}${sortHeadCell('size', '大小', true)}<div></div>`;
     head.querySelectorAll('.list-sort').forEach((b) => { b.onclick = () => setSort(b.dataset.sort); });
     bindListColumnResize(head);
     wrap.appendChild(head);
@@ -1124,6 +1126,7 @@ function listRow(e, i) {
   el.innerHTML = `<div class="icon">${(e.kind === 'image' || e.kind === 'video') ? `<img class="thumb-sm js-lazy-thumb" loading="lazy" decoding="async" src="${THUMB_PLACEHOLDER}" data-src="${escapeHtml(thumbSrc)}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'svg-icon',innerHTML:this.dataset.fb||''}))" data-fb='${escapeHtml(iconSvg(e, 18))}'>` : `<span class="svg-icon">${iconSvg(e, 18)}</span>`}</div>
     <div class="fname">${escapeHtml(e.name)}${projBadge(e)}${dirHint}</div>
     <div class="meta">${fmtTime(e.mtime)}</div>
+    <div class="meta">${fmtTime(e.btime)}</div>
     <div class="meta type-meta">${kindLabel(e)}</div>
     <div class="meta">${e.isDir ? '' : fmtSize(e.size)}</div>
     ${favBtn(e)}`;

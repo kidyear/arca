@@ -366,7 +366,7 @@ kbd {
 /* 列表视图 */
 .list { display: flex; flex-direction: column; }
 .list .row {
-  display: grid; grid-template-columns: 30px minmax(0, 1fr) var(--list-mtime-w, 130px) var(--list-kind-w, 112px) var(--list-size-w, 90px) 26px; align-items: center; gap: 10px;
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) var(--list-mtime-w, 130px) var(--list-btime-w, 130px) var(--list-kind-w, 112px) var(--list-size-w, 90px) 26px; align-items: center; gap: 10px;
   padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; position: relative;
 }
 .list .row:hover { background: var(--bg-2); }
