@@ -27,6 +27,8 @@ const PLATFORM = process.platform;
 const LISTDIR_STAT_CONCURRENCY = 64;
 const PROJECT_PROBE_CONCURRENCY = 8;
 const PROJECT_PROBE_TIMEOUT_MS = 120;
+const DRIVE_PROBE_CONCURRENCY = 8;
+const DRIVE_PROBE_TIMEOUT_MS = 120;
 
 // 搜索 / 遍历时跳过的重目录，避免 vibe coding 项目里 node_modules 拖垮速度
 const IGNORE_DIRS = new Set([
@@ -155,6 +157,24 @@ function withTimeout(promise, ms) {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
+}
+
+async function listDrives() {
+  if (PLATFORM !== 'win32') return [{ name: '文件系统 /', path: '/', type: 'root' }];
+  const letters = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+  const drives = (await mapLimit(letters, DRIVE_PROBE_CONCURRENCY, async (letter) => {
+    const root = `${letter}:\\`;
+    try {
+      const st = await withTimeout(fsp.stat(root), DRIVE_PROBE_TIMEOUT_MS);
+      if (!st.isDirectory()) return null;
+      return { name: `${letter}: 盘`, path: root, letter, type: 'drive' };
+    } catch {
+      return null;
+    }
+  })).filter(Boolean);
+  if (drives.length) return drives;
+  const homeRoot = path.parse(HOME).root;
+  return homeRoot ? [{ name: homeRoot.replace(/[\\/]+$/, '') || homeRoot, path: homeRoot, type: 'drive' }] : [];
 }
 
 async function readConfig() {
@@ -1428,13 +1448,6 @@ function defaultRoots() {
     ['桌面 (OneDrive)', path.join(HOME, 'OneDrive', '桌面')],
     ['文档 (OneDrive)', path.join(HOME, 'OneDrive', '文档')],
   ];
-  // Windows：把所有就绪的盘符列进快速入口（C: 之外的 D:/E:/… 也能进）
-  if (PLATFORM === 'win32') {
-    for (let c = 65; c <= 90; c++) {
-      const letter = String.fromCharCode(c);
-      candidates.push([`${letter}: 盘`, `${letter}:\\`]);
-    }
-  }
   return candidates
     .filter(([, p]) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } })
     .map(([name, p]) => ({ name, path: p }));
@@ -2212,6 +2225,9 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/api/ai/')) { if (await ai.handle(req, res, url)) return; }
     if (p === '/api/roots') {
       return sendJSON(res, 200, { home: HOME, platform: PLATFORM, sep: path.sep, roots: defaultRoots() });
+    }
+    if (p === '/api/drives') {
+      return sendJSON(res, 200, { drives: await listDrives() });
     }
     if (p === '/api/list') {
       return sendJSON(res, 200, await listDir(qp.get('path') || HOME));

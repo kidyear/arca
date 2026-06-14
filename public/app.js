@@ -31,6 +31,7 @@ const SVG = {
   pen: '<path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/>',
   edit3: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
   inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  drive: '<line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/>',
   globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
   gitbranch: '<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
   // 高辨识度文件类型图标
@@ -214,7 +215,7 @@ const state = {
   fileClip: null, fileClipSet: new Set(), // 文件剪贴板 {op:'copy'|'cut', paths:[]}; fileClipSet 只缓存剪切项用于淡化标记
   undoStack: [], redoStack: [], // 资源管理器同款 Ctrl+Z/Ctrl+Y：轻量撤销/重做最近文件操作
   folderTabs: [], activeFolderTab: null, folderTabSeq: 0, closedFolderTabs: [], // Windows 11 Explorer 式文件夹标签页
-  favorites: [], recentOpened: [], recentMode: false, skillsMode: false,
+  favorites: [], drives: [], recentOpened: [], recentMode: false, skillsMode: false,
   previewW: Number(localStorage.getItem('fb_preview_w')) || 480,
   previewH: Number(localStorage.getItem('fb_preview_h')) || 340,
   sidebarCollapsed: localStorage.getItem('fb_sidebar_collapsed') === '1',
@@ -3557,6 +3558,13 @@ function navDirLi(name, p) {
   bindSidebarDropTarget(li, p);
   return li;
 }
+function navDriveLi(drive) {
+  const li = navDirLi(drive.name, drive.path);
+  li.classList.add('drive-root');
+  const ico = li.querySelector('.ico');
+  if (ico) ico.innerHTML = ic('drive', 'currentColor', 16);
+  return li;
+}
 async function toggleNavSub(li, dirPath, twirl) {
   const old = li.nextElementSibling;
   if (old && old.classList.contains('nav-sub')) { old.remove(); twirl.textContent = '▸'; return; }
@@ -3631,6 +3639,25 @@ async function loadRoots() {
   data.roots.forEach((r) => ul.appendChild(navDirLi(r.name, r.path)));
   ul.appendChild(networkLocationLi());
   renderSidebarActive();
+}
+async function loadDrives() {
+  const ul = $('#drives-list');
+  if (!ul) return;
+  ul.innerHTML = '<div class="nav-empty">正在读取磁盘…</div>';
+  try {
+    const data = await api('/api/drives');
+    state.drives = data.drives || [];
+    ul.innerHTML = '';
+    if (!state.drives.length) {
+      ul.innerHTML = '<div class="nav-empty">未发现可访问磁盘</div>';
+      return;
+    }
+    state.drives.forEach((d) => ul.appendChild(navDriveLi(d)));
+    renderSidebarActive();
+  } catch {
+    state.drives = [];
+    ul.innerHTML = '<div class="nav-empty">磁盘读取失败</div>';
+  }
 }
 function renderSidebarActive() {
   const rows = [...document.querySelectorAll('#sidebar li[data-path]')];
@@ -6238,6 +6265,7 @@ async function init() {
   }, true);
   document.querySelectorAll('#theme-switch .theme-seg button').forEach((b) => { b.onclick = () => applyTheme(b.dataset.skin); });
   await loadRoots();
+  await loadDrives();
   await loadFavorites();
   loadAgentProjects();
   setInterval(loadAgentProjects, 120000); // agent 项目入口保持新鲜（服务端有 60s 缓存，开销很小）
