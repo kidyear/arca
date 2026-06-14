@@ -118,6 +118,7 @@ function resolvePath(p) {
   }
   if (PLATFORM === 'win32') {
     input = input.replace(/%([^%\\/]+)%/g, (m, key) => process.env[key] || process.env[key.toUpperCase()] || m);
+    input = input.replace(/^([A-Za-z]):$/, '$1:\\');
   }
   let abs = input.startsWith('~') ? path.join(HOME, input.slice(1)) : input;
   if (!path.isAbsolute(abs)) abs = path.join(HOME, abs);
