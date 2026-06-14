@@ -398,8 +398,25 @@ function renderFolderTabs() {
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-selected', tab.id === state.activeFolderTab ? 'true' : 'false');
     button.tabIndex = 0;
+    button.draggable = true;
     button.onclick = () => switchFolderTab(tab.id);
     button.oncontextmenu = (ev) => showFolderTabMenu(ev, tab);
+    button.ondragstart = (ev) => {
+      ev.dataTransfer.setData('application/x-arca-folder-tab', tab.id);
+      ev.dataTransfer.effectAllowed = 'move';
+    };
+    button.ondragover = (ev) => {
+      const draggedId = ev.dataTransfer.getData('application/x-arca-folder-tab');
+      if (!draggedId || draggedId === tab.id) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+    };
+    button.ondrop = (ev) => {
+      const draggedId = ev.dataTransfer.getData('application/x-arca-folder-tab');
+      if (!draggedId || draggedId === tab.id) return;
+      ev.preventDefault();
+      moveFolderTab(draggedId, tab.id);
+    };
     button.onmousedown = (ev) => {
       if (ev.button === 1) { ev.preventDefault(); closeFolderTab(tab.id); }
     };
@@ -423,6 +440,14 @@ function renderFolderTabs() {
   });
   const active = host.querySelector('.folder-tab.active');
   if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+function moveFolderTab(fromId, toId) {
+  const from = state.folderTabs.findIndex((tab) => tab.id === fromId);
+  const to = state.folderTabs.findIndex((tab) => tab.id === toId);
+  if (from < 0 || to < 0 || from === to) return;
+  const [tab] = state.folderTabs.splice(from, 1);
+  state.folderTabs.splice(to, 0, tab);
+  renderFolderTabs();
 }
 async function newFolderTab(path = state.cwd || state.home) {
   if (!path) return;
