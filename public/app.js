@@ -2603,6 +2603,15 @@ function pushRedo(op) {
   state.redoStack.push({ ...op, ts: Date.now() });
   if (state.redoStack.length > 20) state.redoStack.shift();
 }
+function trashUndoItemFromResult(source, result) {
+  return {
+    from: result.originalPath || source.path || source.from,
+    trashPath: result.trashPath || result.path,
+    trashKind: result.trashKind || 'app',
+    name: result.name || source.name,
+    isDir: !!(result.isDir ?? source.isDir),
+  };
+}
 async function undoLast() {
   const op = state.undoStack.pop();
   if (!op) { toast('没有可撤销的文件操作'); return; }
@@ -2651,7 +2660,7 @@ async function undoLast() {
   if (op.type === 'trash') {
     let fail = 0, restored = [];
     for (const it of [...(op.items || [])].reverse()) {
-      const r = await apiPost('/api/trash-restore', { trashPath: it.trashPath, path: it.from }).catch((err) => ({ error: err.message }));
+      const r = await apiPost('/api/trash-restore', { trashPath: it.trashPath, path: it.from, trashKind: it.trashKind }).catch((err) => ({ error: err.message }));
       if (r.error) fail++;
       else restored.push({ ...it, from: r.path });
     }
@@ -2724,7 +2733,7 @@ async function redoLast() {
     for (const it of op.items || []) {
       const r = await apiPost('/api/trash-undoable', { path: it.from }).catch((err) => ({ error: err.message }));
       if (r.error) fail++;
-      else trashed.push({ ...it, from: r.originalPath || it.from, trashPath: r.trashPath || r.path, name: r.name || it.name, isDir: !!r.isDir });
+      else trashed.push({ ...it, ...trashUndoItemFromResult(it, r) });
     }
     toast(fail ? `重做删除完成，${fail} 项失败` : `已重做删除 ${trashed.length} 项`);
     await refresh();
@@ -3065,7 +3074,7 @@ async function trashSelection() {
   for (const it of items) {
     const r = await apiPost('/api/trash-undoable', { path: it.path });
     if (r.error) fail++;
-    else undoItems.push({ from: r.originalPath || it.path, trashPath: r.trashPath || r.path, name: it.name, isDir: it.isDir });
+    else undoItems.push(trashUndoItemFromResult(it, r));
   }
   if (undoItems.length) pushUndo({ type: 'trash', items: undoItems, label: '删除' });
   toast(fail ? `完成，${fail} 项删除失败` : `已把 ${items.length} 项移到废纸篓，Ctrl+Z 可恢复`);
@@ -3153,7 +3162,7 @@ async function doTrash(e) {
   }
   const r = await apiPost('/api/trash-undoable', { path: e.path });
   if (r.error) { toast('删除失败：' + r.error, true); return; }
-  pushUndo({ type: 'trash', items: [{ from: r.originalPath || e.path, trashPath: r.trashPath || r.path, name: e.name, isDir: e.isDir }], label: '删除' });
+  pushUndo({ type: 'trash', items: [trashUndoItemFromResult(e, r)], label: '删除' });
   toast('已移到废纸篓，Ctrl+Z 可恢复');
   if (state.selected === e.path) closePreview();
   await refresh();

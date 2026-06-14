@@ -581,6 +581,69 @@ function trashPath(p) {
   });
 }
 
+function execPowerShellJson(script, args = [], opts = {}) {
+  return new Promise((resolve) => {
+    execFile('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, ...args], {
+      windowsHide: true,
+      timeout: opts.timeout || 30000,
+      maxBuffer: opts.maxBuffer || 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err) return resolve({ ok: false, error: (stderr || err.message || '').trim() || err.message });
+      const text = String(stdout || '').trim();
+      if (!text) return resolve({ ok: false, error: 'PowerShell 未返回结果' });
+      try {
+        return resolve(JSON.parse(text.split(/\r?\n/).filter(Boolean).pop()));
+      } catch (e) {
+        return resolve({ ok: false, error: `PowerShell 返回无法解析：${e.message}` });
+      }
+    });
+  });
+}
+
+async function trashPathSystemUndoable(p) {
+  if (PLATFORM !== 'win32') return { ok: false, error: '系统回收站撤销仅支持 Windows' };
+  let target;
+  try { target = resolvePath(p); } catch { return { ok: false, error: '非法路径' }; }
+  let st;
+  try { st = await fsp.lstat(target); } catch { return { ok: false, error: '文件不存在' }; }
+  if (path.resolve(target) === path.parse(path.resolve(target)).root) return { ok: false, error: '不能删除磁盘根目录' };
+  const script = `& {
+param([string]$Target, [string]$Kind)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName Microsoft.VisualBasic
+$name = [System.IO.Path]::GetFileName($Target)
+$deletedFrom = [System.IO.Path]::GetDirectoryName($Target)
+if ($Kind -eq 'dir') {
+  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($Target, 'OnlyErrorDialogs', 'SendToRecycleBin')
+} else {
+  [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($Target, 'OnlyErrorDialogs', 'SendToRecycleBin')
+}
+$shell = New-Object -ComObject Shell.Application
+$bin = $shell.Namespace(10)
+$match = $null
+$matchDate = [datetime]::MinValue
+foreach ($item in $bin.Items()) {
+  $from = [string]$item.ExtendedProperty('System.Recycle.DeletedFrom')
+  if ($item.Name -eq $name -and $from -eq $deletedFrom) {
+    $date = $item.ExtendedProperty('System.Recycle.DateDeleted')
+    if ($date -isnot [datetime]) { $date = [datetime]::MinValue }
+    if (-not $match -or $date -ge $matchDate) { $match = $item; $matchDate = $date }
+  }
+}
+[pscustomobject]@{
+  ok = $true
+  trashKind = 'system'
+  trashPath = $(if ($match) { $match.Path } else { $null })
+  path = $(if ($match) { $match.Path } else { $null })
+  originalPath = $Target
+  name = $name
+  isDir = ($Kind -eq 'dir')
+  deletedFrom = $deletedFrom
+} | ConvertTo-Json -Compress
+}`;
+  return execPowerShellJson(script, [target, st.isDirectory() ? 'dir' : 'file']);
+}
+
 function isInsideDir(candidate, root) {
   const c = path.resolve(candidate);
   const r = path.resolve(root);
@@ -601,6 +664,10 @@ async function moveFsPath(src, dst) {
 }
 
 async function trashPathUndoable(p) {
+  if (PLATFORM === 'win32') {
+    const system = await trashPathSystemUndoable(p);
+    if (system && system.ok) return system;
+  }
   let target;
   try { target = resolvePath(p); } catch { return { ok: false, error: '非法路径' }; }
   let st;
@@ -611,14 +678,79 @@ async function trashPathUndoable(p) {
   try {
     await fsp.mkdir(bucket, { recursive: true });
     await moveFsPath(target, trashPath);
-    return { ok: true, path: trashPath, trashPath, originalPath: target, name: path.basename(target), isDir: st.isDirectory() };
+    return { ok: true, trashKind: 'app', path: trashPath, trashPath, originalPath: target, name: path.basename(target), isDir: st.isDirectory() };
   } catch (e) {
     await fsp.rm(bucket, { recursive: true, force: true }).catch(() => {});
     return { ok: false, error: e.message };
   }
 }
 
-async function restoreTrashedPath(trashPathInput, originalPathInput) {
+async function restoreSystemTrashedPath(originalPathInput, recyclePathInput) {
+  if (PLATFORM !== 'win32') return { ok: false, error: '系统回收站恢复仅支持 Windows' };
+  let originalPath;
+  try { originalPath = resolvePath(originalPathInput); } catch { return { ok: false, error: '非法恢复路径' }; }
+  if (fs.existsSync(originalPath)) return { ok: false, error: '原位置已有同名项目' };
+  const recyclePath = String(recyclePathInput || '');
+  const script = `& {
+param([string]$OriginalPath, [string]$RecyclePath)
+$ErrorActionPreference = 'Stop'
+$name = [System.IO.Path]::GetFileName($OriginalPath)
+$deletedFrom = [System.IO.Path]::GetDirectoryName($OriginalPath)
+$shell = New-Object -ComObject Shell.Application
+$bin = $shell.Namespace(10)
+$target = $null
+$targetDate = [datetime]::MinValue
+foreach ($item in $bin.Items()) {
+  $from = [string]$item.ExtendedProperty('System.Recycle.DeletedFrom')
+  if ($RecyclePath -and $item.Path -eq $RecyclePath) { $target = $item; break }
+  if ($item.Name -eq $name -and $from -eq $deletedFrom) {
+    $date = $item.ExtendedProperty('System.Recycle.DateDeleted')
+    if ($date -isnot [datetime]) { $date = [datetime]::MinValue }
+    if (-not $target -or $date -ge $targetDate) { $target = $item; $targetDate = $date }
+  }
+}
+if (-not $target) {
+  [pscustomobject]@{ ok = $false; error = '系统回收站中未找到原项目' } | ConvertTo-Json -Compress
+  exit 0
+}
+if ($RecyclePath -and (Test-Path -LiteralPath $RecyclePath)) {
+  New-Item -ItemType Directory -Path (Split-Path -Parent $OriginalPath) -Force | Out-Null
+  Move-Item -LiteralPath $RecyclePath -Destination $OriginalPath
+  $leaf = [System.IO.Path]::GetFileName($RecyclePath)
+  if ($leaf.StartsWith('$R')) {
+    $meta = Join-Path (Split-Path -Parent $RecyclePath) ('$I' + $leaf.Substring(2))
+    Remove-Item -LiteralPath $meta -Force -ErrorAction SilentlyContinue
+  }
+  [pscustomobject]@{ ok = $true; path = $OriginalPath; name = $name; trashKind = 'system' } | ConvertTo-Json -Compress
+  exit 0
+}
+$restored = $false
+foreach ($verb in $target.Verbs()) {
+  $plain = $verb.Name -replace '&',''
+  if ($plain -match 'Restore|还原|Undelete') {
+    try { $verb.DoIt() } catch { $target.InvokeVerb($verb.Name) }
+    $restored = $true
+    break
+  }
+}
+if (-not $restored) {
+  [pscustomobject]@{ ok = $false; error = '系统回收站没有可用的还原动作' } | ConvertTo-Json -Compress
+  exit 0
+}
+for ($i = 0; $i -lt 20; $i++) {
+  if (Test-Path -LiteralPath $OriginalPath) {
+    [pscustomobject]@{ ok = $true; path = $OriginalPath; name = $name; trashKind = 'system' } | ConvertTo-Json -Compress
+    exit 0
+  }
+  Start-Sleep -Milliseconds 150
+}
+[pscustomobject]@{ ok = $false; error = '系统回收站还原后未找到原路径' } | ConvertTo-Json -Compress
+}`;
+  return execPowerShellJson(script, [originalPath, recyclePath], { timeout: 45000 });
+}
+
+async function restoreTrashedPath(trashPathInput, originalPathInput, trashKindInput) {
+  if (trashKindInput === 'system') return restoreSystemTrashedPath(originalPathInput, trashPathInput);
   const trashPath = path.resolve(String(trashPathInput || ''));
   if (!isInsideDir(trashPath, UNDO_TRASH_DIR)) return { ok: false, error: '非法暂存路径' };
   let st;
@@ -2373,7 +2505,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/trash-restore' && req.method === 'POST') {
       const b = await readBody(req);
-      return sendJSON(res, 200, await restoreTrashedPath(b.trashPath, b.path));
+      return sendJSON(res, 200, await restoreTrashedPath(b.trashPath, b.path, b.trashKind));
     }
     if (p === '/api/delete' && req.method === 'POST') {
       const b = await readBody(req);
