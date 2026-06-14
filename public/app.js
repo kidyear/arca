@@ -4245,13 +4245,13 @@ function handleExplorerViewShortcut(e) {
     setGridSize('md');
     return true;
   }
-  if (key === 'Digit3' || e.key === '3') {
+  if (key === 'Digit3' || e.key === '3' || key === 'Digit4' || e.key === '4') {
     e.preventDefault();
     setFileView('grid');
     setGridSize('sm');
     return true;
   }
-  if (key === 'Digit6' || e.key === '6') {
+  if (key === 'Digit5' || e.key === '5' || key === 'Digit6' || e.key === '6') {
     e.preventDefault();
     setFileView('list');
     return true;
