@@ -1,6 +1,6 @@
 # 翻箱 FanBox · Windows 版构建与分发指南
 
-本仓库已完成 Windows 适配（v1.4.0 基础上）。本文说明怎么打出安装包、怎么分发给员工、以及 Windows 版与 mac 版的行为差异。
+本仓库已完成 Windows 适配。本文说明怎么打出安装包、怎么分发给员工、以及 Windows 版与 mac 版的行为差异。
 
 ## 怎么打安装包
 
@@ -33,16 +33,16 @@ npm run dist:win
 
 ## 分发给员工
 
-- 安装包是标准 NSIS 向导（非一键静默），员工可自选安装目录，装完桌面/开始菜单有「翻箱 FanBox」快捷方式。
+- 安装包是标准 NSIS 向导（非一键静默），员工可自选安装目录，装完桌面/开始菜单有「灵匣 Arca」快捷方式。
 - **安装包未做代码签名**，首次运行 Windows SmartScreen 会提示「未知发布者」：点「更多信息 → 仍要运行」即可。要彻底消除提示需要企业代码签名证书（EV 证书立即生效，普通 OV 证书需积累信誉）。
 - 员工机器**无需安装 Node.js**，运行时已打进安装包。
 - 数据与 mac 版一致：全部本地运行、只监听 127.0.0.1、无外网请求。
-- 内置的「新版本提醒」在 Windows 版**默认关闭**（上游 Releases 只有 mac dmg，避免误导）。两种重新启用方式：
+- 内置的「新版本提醒」在公司 Windows 包里优先读取内网更新源；公开/本地开发构建未注入更新源时会自动关闭，不影响主功能。两种启用方式：
   - **内网更新源（推荐，员工不必能连 GitHub）**：在任何内网 HTTP 服务器（nginx / IIS / 一个静态目录）放两个东西——安装包本身，和一个 `latest.json`：
     ```json
     { "version": "1.0.0", "url": "http://你的内网服务器/fanbox/Arca-Setup-1.0.0.exe" }
     ```
-    然后让员工机器的 `~/.fanbox/config.json` 里有 `"updateUrl": "http://你的内网服务器/fanbox/latest.json"`（或设环境变量 `FANBOX_UPDATE_URL`）。发新版 = 把新安装包扔上去 + 改一行 latest.json 的版本号，所有员工启动时右下角会弹更新提示，点击直接从内网下载，全程不出公司网络。
+    发新版 = 把新安装包扔上去 + 改一行 latest.json 的版本号。GitHub Actions 会从仓库变量 `COMPANY_UPDATE_URL` 生成 `electron/company.json` 注入安装包；也可以在员工机器的 `~/.fanbox/config.json` 写 `"updateUrl": "http://你的内网服务器/fanbox/latest.json"`，或设置环境变量 `FANBOX_UPDATE_URL` 覆盖。员工启动时右下角会弹更新提示，点击直接从内网下载，全程不出公司网络。
   - GitHub Releases：设环境变量 `FANBOX_UPDATE_REPO=你的org/fanbox`（要求员工能访问 GitHub）。
 
 ## Windows 版行为差异（相对 mac 版）
@@ -62,7 +62,7 @@ npm run dist:win
 ## 适配改动清单（代码审查用）
 
 - `server.js`：缩略图加 win32 分支（PowerShell System.Drawing，路径经环境变量传递防注入）；内容搜索非 darwin 直接走 grep；`/fs/` 路由修正盘符路径前导斜杠；默认根目录增加 OneDrive 桌面/文档候选。
-- `electron/main.js`：窗口 chrome 按平台分支；终端默认 shell（win → PowerShell）与 locale 注入仅类 Unix；`clip:file` 加 PowerShell 实现；`pty:cwd` 非 darwin 优雅降级;更新检测 win 默认关闭（`FANBOX_UPDATE_REPO` 可开）。
+- `electron/main.js`：窗口 chrome 按平台分支；终端默认 shell（win → PowerShell）固定 UTF-8；`clip:file` 加 PowerShell 实现；`pty:cwd` 非 darwin 优雅降级；更新检测优先走内网 feed / `company.json` 注入，GitHub Releases 作为显式配置兜底。
 - `public/app.js`：路径拆分/拼接全面兼容 `\`；变更噪声过滤加 AppData/$RECYCLE.BIN/Thumbs.db 等；终端路径点击识别支持 `C:\` 盘符路径；⌘ 标签按平台显示为 Ctrl+。
 - `public/style.css`：交通灯避让与自绘拖拽区限定 `plat-darwin`。
 - `package.json`：新增 `build.win`（NSIS x64）+ `nsis` 配置 + `dist:win` 脚本；`build/icon.ico`（256/48/32/16 四尺寸）。

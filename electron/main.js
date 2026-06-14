@@ -9,6 +9,7 @@ const { app, BrowserWindow, ipcMain, shell, nativeImage, Menu, clipboard, dialog
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { cmpVer, parseUpdateFeed, updateNoticeForFeed } = require('./update-feed.js');
 
 // 复用现有后端：require 即 listen 127.0.0.1:PORT，不自动开浏览器
 process.env.FANBOX_NO_OPEN = '1';
@@ -140,12 +141,6 @@ function startShotWatch() {
 // ---------- 更新检测：查 GitHub Releases，有新版本通知渲染层引导下载 ----------
 // 现阶段只做「检测 + 引导」：Apple Development 签名过不了 Squirrel.Mac 的校验，
 // electron-updater 全自动更新要等升级 Developer ID 后再换
-function cmpVer(a, b) {
-  const pa = String(a).replace(/^v/, '').split('.').map(Number);
-  const pb = String(b).replace(/^v/, '').split('.').map(Number);
-  for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
-  return 0;
-}
 // 更新源三选一（优先级从高到低）：
 // 1. 内网静态 JSON（公司分发推荐，员工不必能连 GitHub）：env FANBOX_UPDATE_URL 或
 //    ~/.fanbox/config.json 的 "updateUrl" 字段，指向 {"version":"1.6.0","url":"http://内网/安装包或下载页"}
@@ -169,7 +164,7 @@ async function fetchLatestRelease(src) {
     const res = await net.fetch(src.feedUrl, { headers: { 'User-Agent': 'arca-app' }, cache: 'no-store' });
     if (!res.ok) return null;
     const j = await res.json();
-    return j.version ? { tag: String(j.version), url: String(j.url || src.feedUrl) } : null;
+    return parseUpdateFeed(j, src.feedUrl);
   }
   const relPage = `https://github.com/${src.repo}/releases/latest`;
   // 先走 API（信息全）；代理共享出口 IP 很容易吃 GitHub API 的未认证限流（60 次/小时/IP，403），
@@ -220,15 +215,15 @@ async function checkUpdate(opts) {
     return;
   }
   updRetry = 0;
-  const newer = cmpVer(info.tag, app.getVersion()) > 0;
-  if (newer) {
-    pendingUpdate = { version: info.tag.replace(/^v/, ''), url: info.url };
+  const notice = src.type === 'feed' ? updateNoticeForFeed(info, app.getVersion(), src.feedUrl) : (cmpVer(info.tag, app.getVersion()) > 0 ? { version: String(info.tag).replace(/^v/i, ''), url: info.url } : null);
+  if (notice) {
+    pendingUpdate = { version: notice.version, url: notice.url };
     lastUpdateUrl = info.url;
     console.log(`[更新] 发现新版本 v${pendingUpdate.version} → ${info.url}`);
     if (win && !win.isDestroyed()) win.webContents.send('update:available', pendingUpdate);
   }
   if (manual) {
-    if (newer) {
+    if (notice) {
       const c = dialog.showMessageBoxSync(owner(), {
         type: 'info', buttons: [M('去下载', 'Download'), M('取消', 'Cancel')], defaultId: 0, cancelId: 1,
         message: M(`发现新版本 v${pendingUpdate.version}`, `New version v${pendingUpdate.version} available`),
