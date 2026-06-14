@@ -35,7 +35,7 @@ assertIncludes('restoreClosedFolderTab', restoreClosedFolderTab, 'await navigate
 
 const closeFolderTab = sliceFunction(app, 'closeFolderTab');
 assertIncludes('closeFolderTab', closeFolderTab, 'const closed = state.folderTabs[idx]');
-assertIncludes('closeFolderTab', closeFolderTab, 'state.closedFolderTabs.push');
+assertIncludes('closeFolderTab', closeFolderTab, 'rememberClosedFolderTab(closed)');
 
 const bindEvents = sliceFunction(app, 'bindEvents');
 assertIncludes('bindEvents', bindEvents, "mod && e.shiftKey && !e.altKey && (e.key === 't' || e.key === 'T')");

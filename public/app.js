@@ -399,6 +399,7 @@ function renderFolderTabs() {
     button.setAttribute('aria-selected', tab.id === state.activeFolderTab ? 'true' : 'false');
     button.tabIndex = 0;
     button.onclick = () => switchFolderTab(tab.id);
+    button.oncontextmenu = (ev) => showFolderTabMenu(ev, tab);
     button.onmousedown = (ev) => {
       if (ev.button === 1) { ev.preventDefault(); closeFolderTab(tab.id); }
     };
@@ -447,6 +448,15 @@ async function switchFolderTab(id) {
   syncNavButtons();
   if (tab.path && tab.path !== state.cwd) await navigate(tab.path, false);
 }
+function rememberClosedFolderTab(tab) {
+  if (!tab) return;
+  state.closedFolderTabs.push({
+    path: tab.path,
+    title: tab.title,
+    history: [...(tab.history || [])],
+    forwardHistory: [...(tab.forwardHistory || [])],
+  });
+}
 async function closeFolderTab(id) {
   const idx = state.folderTabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
@@ -454,18 +464,41 @@ async function closeFolderTab(id) {
   const closed = state.folderTabs[idx];
   const wasActive = closed.id === state.activeFolderTab;
   state.folderTabs.splice(idx, 1);
-  state.closedFolderTabs.push({
-    path: closed.path,
-    title: closed.title,
-    history: [...(closed.history || [])],
-    forwardHistory: [...(closed.forwardHistory || [])],
-  });
+  rememberClosedFolderTab(closed);
   if (wasActive) {
     const next = state.folderTabs[Math.min(idx, state.folderTabs.length - 1)];
     await switchFolderTab(next.id);
   } else {
     renderFolderTabs();
   }
+}
+async function closeOtherFolderTabs(id) {
+  const keep = state.folderTabs.find((t) => t.id === id);
+  if (!keep) return;
+  syncActiveFolderTabNavigation();
+  state.folderTabs.filter((tab) => tab.id !== id).forEach((tab) => rememberClosedFolderTab(tab));
+  state.folderTabs = [keep];
+  await switchFolderTab(id);
+}
+async function closeFolderTabsToRight(id) {
+  const idx = state.folderTabs.findIndex((t) => t.id === id);
+  if (idx < 0 || idx >= state.folderTabs.length - 1) return;
+  syncActiveFolderTabNavigation();
+  const removed = state.folderTabs.splice(idx + 1);
+  removed.forEach((tab) => rememberClosedFolderTab(tab));
+  if (!state.folderTabs.some((tab) => tab.id === state.activeFolderTab)) await switchFolderTab(state.folderTabs[idx].id);
+  else { renderFolderTabs(); syncNavButtons(); }
+}
+function showFolderTabMenu(ev, tab) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  popupMenu(ev, [
+    { label: '关闭标签页', fn: () => closeFolderTab(tab.id) },
+    { label: '关闭其他标签页', fn: () => closeOtherFolderTabs(tab.id) },
+    { label: '关闭右侧标签页', fn: () => closeFolderTabsToRight(tab.id) },
+    { sep: true },
+    { label: '复制路径', fn: () => copyPath(tab.path) },
+  ]);
 }
 async function restoreClosedFolderTab() {
   const closed = state.closedFolderTabs.pop();

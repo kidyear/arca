@@ -50,8 +50,7 @@ const render = sliceFunction(app, 'render');
 assertIncludes('render', render, 'syncNavButtons()');
 
 const closeFolderTab = sliceFunction(app, 'closeFolderTab');
-assertIncludes('closeFolderTab', closeFolderTab, 'history: [...(closed.history || [])]');
-assertIncludes('closeFolderTab', closeFolderTab, 'forwardHistory: [...(closed.forwardHistory || [])]');
+assertIncludes('closeFolderTab', closeFolderTab, 'rememberClosedFolderTab(closed)');
 
 const restoreClosedFolderTab = sliceFunction(app, 'restoreClosedFolderTab');
 assertIncludes('restoreClosedFolderTab', restoreClosedFolderTab, 'history: [...(closed.history || [])]');
