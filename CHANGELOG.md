@@ -11,11 +11,17 @@
 
 ## [Unreleased]
 
+## [1.0.19] - 2026-06-14
+
 ### Added
 - 文件/文件夹右键新增「创建快捷方式」，Windows 下生成 `.lnk` 并支持多选批量创建，生成物接入 Ctrl+Z / Ctrl+Y 撤销重做。
 
 ### Fixed
 - PowerShell JSON 返回固定 UTF-8，避免中文路径（如“快捷方式”）在 Node 解析后变成乱码。
+
+### Verified
+- 内网更新源解析抽成纯函数并覆盖 `v` 前缀、同版本、坏 URL、缺少安装包 URL 等契约，防止内网 `latest.json` 回归。
+- `node --check` 覆盖本次改动 JS 与新增契约脚本；全部 58 个 `scripts/check-*.js` 契约脚本通过。
 
 ## [1.0.18] - 2026-06-14
 
