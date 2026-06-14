@@ -24,6 +24,7 @@ const THUMB_DIR = path.join(CONFIG_DIR, 'thumbs');
 const UNDO_TRASH_DIR = path.join(CONFIG_DIR, 'undo-trash');
 const PUBLIC = path.join(__dirname, 'public');
 const PLATFORM = process.platform;
+const LISTDIR_STAT_CONCURRENCY = 64;
 
 // 搜索 / 遍历时跳过的重目录，避免 vibe coding 项目里 node_modules 拖垮速度
 const IGNORE_DIRS = new Set([
@@ -134,6 +135,19 @@ function breadcrumbForPath(dir) {
   return breadcrumb;
 }
 
+async function mapLimit(items, limit, worker) {
+  const out = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const idx = next++;
+      out[idx] = await worker(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 async function readConfig() {
   try {
     const raw = await fsp.readFile(CONFIG_FILE, 'utf8');
@@ -174,9 +188,8 @@ function sendJSON(res, code, obj) {
 async function listDir(dirPath) {
   const dir = resolvePath(dirPath);
   const dirents = await fsp.readdir(dir, { withFileTypes: true });
-  const entries = [];
-  for (const d of dirents) {
-    if (d.name === '.DS_Store') continue;
+  const entries = (await mapLimit(dirents, LISTDIR_STAT_CONCURRENCY, async (d) => {
+    if (d.name === '.DS_Store') return null;
     const full = path.join(dir, d.name);
     let isDir = d.isDirectory();
     let size = 0, mtime = 0;
@@ -185,7 +198,7 @@ async function listDir(dirPath) {
       try {
         const st = await fsp.stat(full);
         isDir = st.isDirectory();
-      } catch { continue; }
+      } catch { return null; }
     }
     let btime = 0;
     try {
@@ -194,7 +207,7 @@ async function listDir(dirPath) {
       mtime = st.mtimeMs;
       btime = st.birthtimeMs || 0;
     } catch { /* ignore */ }
-    entries.push({
+    return {
       name: d.name,
       path: full,
       isDir,
@@ -203,8 +216,8 @@ async function listDir(dirPath) {
       size,
       mtime,
       btime,
-    });
-  }
+    };
+  })).filter(Boolean);
   // 文件夹在前，按名称排序
   entries.sort((a, b) => {
     if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
