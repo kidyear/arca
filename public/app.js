@@ -957,6 +957,7 @@ async function searchCurrentTree() {
 function clearFileFilterFromKeyboard() {
   if (!state.filter && !state.searchMode) return false;
   setFileFilter('');
+  syncFilterUi(true);
   focusFileArea();
   toast('已清空当前目录搜索');
   return true;
@@ -1030,11 +1031,16 @@ function renderStatusbar() {
   const stats = state.visibleStats || { count: 0, dirs: 0, files: 0, bytes: 0 };
   const selected = state.selectionStats || { count: 0, dirs: 0, files: 0, bytes: 0 };
   const totalText = `${stats.count} 项${stats.dirs ? ` · ${stats.dirs} 文件夹` : ''}${stats.files ? ` · ${stats.files} 文件 ${fmtSize(stats.bytes)}` : ''}`;
-  const selectedText = selected.count
+  let selectedText = selected.count
     ? `<b class="sb-selected">已选 ${selected.count} 项${selected.dirs ? ` · ${selected.dirs} 文件夹` : ''}${selected.files ? ` · ${selected.files} 文件 ${fmtSize(selected.bytes)}` : ''}</b><span class="sb-total"> · 共 ${totalText}</span>`
     : totalText;
+  if (state.searchMode) {
+    const rootText = state.searchRoot ? ` · ${escapeHtml(tilde(state.searchRoot))}` : '';
+    selectedText = `<b class="sb-selected">搜索「${escapeHtml(state.searchQuery)}」</b>${rootText}<span class="sb-total"> · ${selectedText}</span>`;
+  }
   sb.classList.remove('hidden');
-  sb.innerHTML = `<span class="sb-summary">${selectedText}</span><span class="sb-links">${state.project ? '<a id="sb-rel" title="版本号→CHANGELOG→打包→push→Release 一条龙，在终端跑">发版</a>' : ''}<a id="sb-mem" title="这个文件夹里 AI 干过什么：历史会话、改过的文件、一键续上">项目记忆</a><a id="sb-du" title="算上子目录的真实磁盘占用">占用透视</a></span>`;
+  sb.innerHTML = `<span class="sb-summary">${selectedText}</span><span class="sb-links">${state.searchMode ? '<a id="sb-clear-search" title="清空搜索结果并回到原目录列表">清空搜索</a>' : ''}${state.project ? '<a id="sb-rel" title="版本号→CHANGELOG→打包→push→Release 一条龙，在终端跑">发版</a>' : ''}<a id="sb-mem" title="这个文件夹里 AI 干过什么：历史会话、改过的文件、一键续上">项目记忆</a><a id="sb-du" title="算上子目录的真实磁盘占用">占用透视</a></span>`;
+  const clearSearch = $('#sb-clear-search'); if (clearSearch) clearSearch.onclick = () => clearFileFilterFromKeyboard();
   $('#sb-du').onclick = () => diskPanel(state.cwd);
   $('#sb-mem').onclick = () => memoryPanel(state.cwd);
   const rel = $('#sb-rel'); if (rel) rel.onclick = () => releasePanel();
