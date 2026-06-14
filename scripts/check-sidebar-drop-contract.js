@@ -24,8 +24,7 @@ assertIncludes('bindSidebarDropTarget', bindSidebarDropTarget, "addEventListener
 assertIncludes('bindSidebarDropTarget', bindSidebarDropTarget, 'isInternalDrag(ev.dataTransfer)');
 assertIncludes('bindSidebarDropTarget', bindSidebarDropTarget, 'dropInternalPathsToDir(internalDragPaths(ev.dataTransfer), dirPath');
 assertIncludes('bindSidebarDropTarget', bindSidebarDropTarget, "t.includes('Files')");
-assertIncludes('bindSidebarDropTarget', bindSidebarDropTarget, 'window.fanboxDrop.pathForFile');
-assertIncludes('bindSidebarDropTarget', bindSidebarDropTarget, "/api/copy-in");
+assertIncludes('bindSidebarDropTarget', bindSidebarDropTarget, "copyExternalFilesToDir([...(ev.dataTransfer.files || [])], dirPath");
 assertIncludes('bindSidebarDropTarget', bindSidebarDropTarget, "li.classList.add('drop-target')");
 
 const navDirLi = sliceFunction(app, 'navDirLi');

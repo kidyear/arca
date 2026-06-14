@@ -378,6 +378,7 @@ function goForward() {
   navigate(next, false);
 }
 function goUp() { if (state.parent && state.parent !== state.cwd) navigate(state.parent); }
+function goHome() { if (state.home) navigate(state.home); }
 function goBackspace() {
   if (state.history.length) goBack();
   else goUp();
@@ -445,17 +446,23 @@ function renderBreadcrumb() {
     el.dataset.path = c.path;
     el.onclick = () => navigate(c.path);
     el.addEventListener('dragover', (ev) => {
-      if (!isInternalDrag(ev.dataTransfer) || state.skillsMode || state.recentMode) return;
+      const t = ev.dataTransfer.types;
+      if ((!isInternalDrag(ev.dataTransfer) && !t.includes('Files')) || state.skillsMode || state.recentMode) return;
       ev.preventDefault(); ev.stopPropagation();
-      ev.dataTransfer.dropEffect = (ev.ctrlKey || ev.metaKey) ? 'copy' : 'move';
+      ev.dataTransfer.dropEffect = isInternalDrag(ev.dataTransfer) && !(ev.ctrlKey || ev.metaKey) ? 'move' : 'copy';
       el.classList.add('drop-target');
     });
     el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
     el.addEventListener('drop', async (ev) => {
-      if (!isInternalDrag(ev.dataTransfer) || state.skillsMode || state.recentMode) return;
+      const t = ev.dataTransfer.types;
+      if ((!isInternalDrag(ev.dataTransfer) && !t.includes('Files')) || state.skillsMode || state.recentMode) return;
       ev.preventDefault(); ev.stopPropagation();
       el.classList.remove('drop-target');
-      await dropInternalPathsToDir(internalDragPaths(ev.dataTransfer), c.path, ev.ctrlKey || ev.metaKey, { reveal: true });
+      if (isInternalDrag(ev.dataTransfer)) {
+        await dropInternalPathsToDir(internalDragPaths(ev.dataTransfer), c.path, ev.ctrlKey || ev.metaKey, { reveal: true });
+        return;
+      }
+      await copyExternalFilesToDir([...(ev.dataTransfer.files || [])], c.path, { reveal: true });
     });
     bc.appendChild(el);
   });
@@ -818,6 +825,14 @@ function renderFiles() {
   paintCutMarks(true);
   highlightCursor(true);
 }
+function fileScrollTop() {
+  const host = $('#content');
+  return host ? host.scrollTop : 0;
+}
+function restoreFileScrollTop(top) {
+  const host = $('#content');
+  if (host) host.scrollTop = top;
+}
 function measureCols() {
   const items = $('#file-area').querySelectorAll('.item');
   if (!items.length) { state.cols = 1; return; }
@@ -995,22 +1010,9 @@ function bindSidebarDropTarget(li, dirPath) {
       await dropInternalPathsToDir(internalDragPaths(ev.dataTransfer), dirPath, ev.ctrlKey || ev.metaKey);
       return;
     }
-    if (!window.fanboxDrop || !ev.dataTransfer.files) { toast('浏览器版无法读取拖入文件路径，请用桌面版', true); return; }
-    let okCount = 0, lastErr = '';
-    const undoItems = [];
-    for (const f of [...ev.dataTransfer.files]) {
-      const src = window.fanboxDrop.pathForFile(f);
-      if (!src) { lastErr = `${f.name} 没有可读取的源路径`; continue; }
-      const r = await apiPost('/api/copy-in', { src, dstDir: dirPath }).catch((err) => ({ ok: false, error: err.message }));
-      if (r.ok) { okCount++; undoItems.push({ path: r.path, from: src }); }
-      else lastErr = r.error || '复制失败';
-    }
-    if (okCount) {
-      pushUndo({ type: 'copy', items: undoItems, label: '复制' });
-      toast(`已复制 ${okCount} 个到 ${baseOf(dirPath) || dirPath}`);
-      if (pathContains(state.cwd, dirPath) || pathContains(dirPath, state.cwd)) await refresh();
-    }
-    if (lastErr) toast(lastErr, true);
+    await copyExternalFilesToDir([...(ev.dataTransfer.files || [])], dirPath, {
+      refresh: pathContains(state.cwd, dirPath) || pathContains(dirPath, state.cwd),
+    });
   });
 }
 function registerEntryElement(el, path) {
@@ -1132,6 +1134,42 @@ async function dropInternalPathsToDir(paths, dstDir, copy, opts = {}) {
   if (lastErr) toast(lastErr, true);
   return okCount;
 }
+async function copyExternalFilesToDir(files, dstDir, opts = {}) {
+  const list = [...(files || [])];
+  if (!list.length) return 0;
+  const norm = (p) => String(p || '').replace(/[\\/]+$/, '');
+  const target = norm(dstDir);
+  let okCount = 0, lastErr = '';
+  const undoItems = [];
+  for (const f of list) {
+    const src = window.fanboxDrop && window.fanboxDrop.pathForFile(f);
+    if (src) {
+      const r = await apiPost('/api/copy-in', { src, dstDir }).catch((err) => ({ ok: false, error: err.message }));
+      if (r.ok) { okCount++; undoItems.push({ path: r.path, from: src }); }
+      else lastErr = r.error || '复制失败';
+    } else if (f.size <= 64 * 1024 * 1024) {
+      // 浏览器版拿不到源路径：直接把内容写进目标目录。
+      try {
+        const buf = await f.arrayBuffer();
+        const dest = target + state.sep + f.name;
+        const r = await apiPost('/api/write-binary', { path: dest, base64: abToBase64(buf) });
+        if (r.ok) { okCount++; undoItems.push({ path: r.path || dest, from: f.name }); }
+        else lastErr = r.error || '写入失败';
+      } catch (err) { lastErr = err.message; }
+    } else {
+      lastErr = `${f.name} 超过 64MB，浏览器版无法导入，请用桌面版`;
+    }
+  }
+  if (okCount) {
+    pushUndo({ type: 'copy', items: undoItems, label: '复制' });
+    toast(`已复制 ${okCount} 个到 ${baseOf(dstDir) || dstDir}`);
+    if (opts.reveal && norm(state.cwd) !== target) await navigate(dstDir);
+    else if (opts.refresh !== false) await refresh();
+    selectVisiblePaths(undoItems.map((it) => it.path).filter(Boolean));
+  }
+  if (lastErr) toast(lastErr, true);
+  return okCount;
+}
 function selectNearestIndex(idx) {
   if (!state.visible.length) { clearSelection(); return false; }
   const next = Math.max(0, Math.min(state.visible.length - 1, idx));
@@ -1197,6 +1235,19 @@ function clearSelection() {
     renderPreviewFoot(null);
     $('#preview-body').innerHTML = `<div class="empty-state"><div class="big">${ic('inbox', 'currentColor', 48)}</div>选择一个文件即可预览</div>`;
   }
+}
+function restoreSelectionAfterRefresh(oldSelected, oldMultiSel, oldAnchor, oldCursor) {
+  const kept = [...oldMultiSel].filter((p) => state.entryByPath.has(p));
+  state.multiSel = new Set(kept);
+  state.selected = oldSelected && state.entryByPath.has(oldSelected) ? oldSelected : (kept[0] || null);
+  if (!state.selected && state.visible.length && oldCursor >= 0) {
+    const fallbackIdx = Math.min(oldCursor, state.visible.length - 1);
+    state.selected = state.visible[fallbackIdx].path;
+  }
+  state.selectionAnchor = oldAnchor && state.entryByPath.has(oldAnchor) ? oldAnchor : state.selected;
+  state.cursor = state.visible.findIndex((e) => e.path === state.selected);
+  paintSelection();
+  highlightCursor();
 }
 function invertSelection() {
   const current = new Set(selPaths());
@@ -1347,6 +1398,19 @@ function previewEntry(e) {
   if (e.isDir) { previewPlaceholder(e, '文件夹没有预览，按 Alt+Enter 查看属性'); return; }
   openPreview(e);
   recordRecent(e.path);
+}
+function syncPreviewAfterRefresh() {
+  if (!previewVisible()) return;
+  const e = selectedPreviewEntry();
+  if (e) {
+    if (e.isDir) { previewPlaceholder(e, '文件夹没有预览，按 Alt+Enter 查看属性'); return; }
+    openPreview(e);
+    return;
+  }
+  $('#preview-title').textContent = '未选择文件';
+  $('#preview-actions').innerHTML = '';
+  renderPreviewFoot(null);
+  $('#preview-body').innerHTML = `<div class="empty-state"><div class="big">${ic('inbox', 'currentColor', 48)}</div>选择一个文件即可预览</div>`;
 }
 // 单击=选中；预览窗格已打开时才随选择刷新。双击/Enter=进入/打开——跟随资源管理器的肌肉记忆
 function onItemClick(e) {
@@ -2320,6 +2384,11 @@ async function toggleFav(e) {
 // 重拉当前目录但保留筛选词，操作后刷新视图
 async function refresh() {
   if (!state.cwd || state.recentMode) return;
+  const oldSelected = state.selected;
+  const oldMultiSel = new Set(state.multiSel);
+  const oldAnchor = state.selectionAnchor;
+  const oldCursor = state.cursor;
+  const oldScrollTop = fileScrollTop();
   const data = await api('/api/list?path=' + encodeURIComponent(state.cwd));
   if (data.error) return;
   state.entries = prepareEntries(data.entries);
@@ -2327,6 +2396,9 @@ async function refresh() {
   state.breadcrumb = data.breadcrumb;
   renderBreadcrumb();
   renderFiles();
+  restoreSelectionAfterRefresh(oldSelected, oldMultiSel, oldAnchor, oldCursor);
+  syncPreviewAfterRefresh();
+  restoreFileScrollTop(oldScrollTop);
 }
 // 文本原地编辑：md → Milkdown Crepe 所见即所得；其它 → Monaco；都失败回退 textarea
 async function enterEditMode(e) {
@@ -2534,15 +2606,36 @@ async function doRename(e, opts = {}) {
   };
   input.addEventListener('click', (ev) => ev.stopPropagation());
   input.addEventListener('dblclick', (ev) => ev.stopPropagation());
-  input.addEventListener('keydown', (ev) => {
+  input.addEventListener('keydown', async (ev) => {
     ev.stopPropagation();
     if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
     else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+    else if (ev.key === 'Tab') {
+      ev.preventDefault();
+      const continueRename = renameAdjacentVisible(e.path, ev);
+      await finish(true);
+      await continueRename();
+    }
   });
   input.addEventListener('blur', () => finish(true));
   input.focus();
   const [from, to] = opts.selectAll ? [0, e.name.length] : editableNameRange(e);
   input.setSelectionRange(from, to);
+}
+function renameAdjacentVisible(path, ev) {
+  const direction = ev.shiftKey ? -1 : 1;
+  const idx = state.visible.findIndex((x) => x.path === path);
+  const nextEntry = idx >= 0 ? state.visible[idx + direction] : null;
+  return async () => {
+    if (!nextEntry) return;
+    const nextEntryFresh = state.visible.find((x) => x.path === nextEntry.path) || nextEntry;
+    const nextIdx = state.visible.findIndex((x) => x.path === nextEntryFresh.path);
+    state.selected = nextEntryFresh.path;
+    state.cursor = nextIdx >= 0 ? nextIdx : idx + direction;
+    state.multiSel.clear();
+    renderFiles();
+    await doRename(nextEntryFresh);
+  };
 }
 async function commitRename(e, name, opts = {}) {
   if (!opts.skipExtWarning && renameChangesExtension(e, name)) {
@@ -3702,32 +3795,7 @@ function bindEvents() {
       await dropInternalPathsToDir(internalDragPaths(e.dataTransfer), dstDir, e.ctrlKey || e.metaKey);
       return;
     }
-    const files = [...(e.dataTransfer.files || [])];
-    if (!files.length) return;
-    let okCount = 0, lastErr = '';
-    const undoItems = [];
-    for (const f of files) {
-      let src = window.fanboxDrop && window.fanboxDrop.pathForFile(f);
-      if (src) {
-        const r = await apiPost('/api/copy-in', { src, dstDir }).catch((err) => ({ ok: false, error: err.message }));
-        if (r.ok) { okCount++; undoItems.push({ path: r.path, from: src }); } else lastErr = r.error || '复制失败';
-      } else if (f.size <= 64 * 1024 * 1024) {
-        // 浏览器版拿不到源路径：直接把内容写进目标目录
-        try {
-          const buf = await f.arrayBuffer();
-          const dest = dstDir.replace(/[\\/]+$/, '') + state.sep + f.name;
-          const r = await apiPost('/api/write-binary', { path: dest, base64: abToBase64(buf) });
-          if (r.ok) { okCount++; undoItems.push({ path: r.path || dest, from: f.name }); } else lastErr = r.error || '写入失败';
-        } catch (err) { lastErr = err.message; }
-      } else { lastErr = `${f.name} 超过 64MB，浏览器版无法导入，请用桌面版`; }
-    }
-    if (okCount) {
-      if (undoItems.length) pushUndo({ type: 'copy', items: undoItems, label: '复制' });
-      toast(`已复制 ${okCount} 个到 ${baseOf(dstDir) || dstDir}`);
-      await refresh();
-      selectVisiblePaths(undoItems.map((it) => it.path));
-    }
-    if (lastErr) toast(lastErr, true);
+    await copyExternalFilesToDir(e.dataTransfer.files, dstDir);
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#context-menu')) closeContextMenu(); });
   window.addEventListener('blur', closeContextMenu);
@@ -3810,6 +3878,7 @@ function bindEvents() {
     if (!inInput && e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goBack(); return; }
     if (!inInput && e.altKey && e.key === 'ArrowRight') { e.preventDefault(); goForward(); return; }
     if (!inInput && e.altKey && e.key === 'ArrowUp') { e.preventDefault(); goUp(); return; }
+    if (!inInput && e.altKey && e.key === 'Home') { e.preventDefault(); goHome(); return; }
     if (!inInput && e.altKey && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); togglePreviewPane(); return; }
     if (!inInput && e.altKey && e.key === 'Enter') { e.preventDefault(); showPropertiesSelection(); return; }
     if (!inInput && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) { e.preventDefault(); openKeyboardContextMenu(); return; }
@@ -3819,6 +3888,7 @@ function bindEvents() {
     if (inInput) return;
     if (e.key === 'F5') { e.preventDefault(); refreshDir(true); return; }
     const mod = e.metaKey || e.ctrlKey;
+    if (mod && !e.shiftKey && !e.altKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); refreshDir(true); return; }
     // 文件剪贴板与全选(资源管理器习惯)
     if (handleExplorerViewShortcut(e)) return;
     if (handleGridSizeShortcut(e)) return;
