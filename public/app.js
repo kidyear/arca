@@ -309,6 +309,7 @@ function dirOf(p) { const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
 function baseOf(p) { const parts = p.split(/[\\/]/).filter(Boolean); return parts[parts.length - 1] || p; }
 function tilde(p) { return state.home && p.startsWith(state.home) ? '~' + p.slice(state.home.length) : p; }
 function isFav(path) { return state.favorites.some((f) => f.path === path); }
+function isVirtualLocation() { return state.virtualMode === 'this-pc'; }
 function toast(msg, isErr) {
   const t = $('#toast');
   t.textContent = msg;
@@ -3051,6 +3052,7 @@ async function clipSet(op) {
   toast(`${op === 'cut' ? '已剪切' : '已复制'} ${paths.length} 项，到目标文件夹按 ${IS_MAC ? '⌘' : 'Ctrl+'}V ${op === 'cut' ? '移动' : '粘贴'}${extra}`);
 }
 async function clipPaste(dstDir) {
+  if (isVirtualLocation() && !dstDir) { toast('请先打开一个磁盘或文件夹再粘贴', true); return; }
   let clip = state.fileClip;
   if ((!clip || !clip.paths.length) && window.fanboxClipboard && window.fanboxClipboard.readFiles) {
     const r = await window.fanboxClipboard.readFiles().catch((err) => ({ ok: false, paths: [], error: err.message }));
@@ -3121,6 +3123,7 @@ function uniqueEntryName(base, ext = '') {
   return name;
 }
 async function doCreate(type) {
+  if (isVirtualLocation()) { toast('此电脑视图不能新建项目', true); return; }
   if (!state.cwd || state.recentMode || state.skillsMode) return;
   const name = type === 'dir' ? uniqueEntryName('新建文件夹') : uniqueEntryName('新建文本文档', '.txt');
   const r = await apiPost('/api/create', { path: state.cwd, name, type });
@@ -3565,6 +3568,7 @@ function menuEventAt(el) {
   };
 }
 function currentFolderEntry() {
+  if (isVirtualLocation()) return null;
   if (!state.cwd) return null;
   return {
     path: state.cwd,
@@ -3582,7 +3586,17 @@ async function currentFolderEntryFresh() {
   const r = await api('/api/stat?path=' + encodeURIComponent(state.cwd)).catch(() => null);
   return (r && r.ok) ? r : fallback;
 }
+function thisPcBlankContextItems() {
+  const blank = [
+    { label: '刷新', fn: () => refreshDir(true) },
+    { label: '全选', fn: () => selectAllVisible() },
+    { label: '反向选择', fn: () => invertSelection() },
+  ];
+  if (selPaths().length) blank.push({ label: '清空选择', fn: () => clearSelection() });
+  return blank;
+}
 function blankContextItems(shiftKey = false) {
+  if (isVirtualLocation()) return thisPcBlankContextItems();
   const blank = [
     { label: '新建文件夹…', fn: () => doCreate('dir') },
     { label: '新建文件…', fn: () => doCreate('file') },
