@@ -287,6 +287,8 @@ kbd {
   display: none; width: 18px; height: 18px; padding: 0; border: none; border-radius: 5px;
   background: transparent; color: var(--text-faint); cursor: pointer; font-size: 11px; line-height: 18px;
 }
+.top-search #file-search-recursive { display: block; font-size: 12px; }
+.top-search #file-search-recursive.active { background: var(--accent-soft); color: var(--accent); }
 .top-search button.show { display: block; }
 .top-search button:hover { background: var(--bg-3); color: var(--text); }
 /* 顶栏越窄越往下藏，低频控件先走，终端按钮永远保住（tb-* 由 ResizeObserver 按顶栏自身宽度打） */

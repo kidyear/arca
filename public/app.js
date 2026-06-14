@@ -204,7 +204,7 @@ const state = {
   sort: localStorage.getItem('fb_sort') || 'name',
   sortDir: localStorage.getItem('fb_sort_dir') || defaultSortDir(localStorage.getItem('fb_sort') || 'name'),
   showHidden: localStorage.getItem('fb_hidden') === '1',
-  filter: '', selected: null, cursor: -1, cols: 1, visible: [], entryByPath: new Map(), domByPath: new Map(), visibleStats: null, selectionStats: null,
+  filter: '', searchMode: false, searchQuery: '', searchRoot: '', searchTruncated: false, searchBaseEntries: null, selected: null, cursor: -1, cols: 1, visible: [], entryByPath: new Map(), domByPath: new Map(), visibleStats: null, selectionStats: null,
   renderSeq: 0, // 大目录分片渲染的取消令牌：新渲染开始后旧批次自动失效
   paintedSelected: new Set(), paintedCursor: -1, // 选择/光标增量刷 class，方向键移动不再扫全列表
   paintedCut: new Set(), // Ctrl+X 后给源文件打淡化标记，像资源管理器一样提醒“正在剪切”
@@ -345,6 +345,7 @@ const isMdName = (n) => /\.(md|markdown)$/i.test(String(n || ''));
 // ---------- 导航 ----------
 async function navigate(p, pushHistory = true) {
   if (!await guardDirty()) return;
+  exitSearchMode(false);
   if (p === 'this-pc') {
     await openThisPcView(pushHistory);
     return;
@@ -781,7 +782,7 @@ function visibleEntries() {
   let list = state.entries.slice();
   if (!state.showHidden) list = list.filter((e) => !e.hidden);
   const q = String(state.filter || '').trim().toLocaleLowerCase('zh');
-  if (q) list = list.filter((e) => searchKey(e).includes(q));
+  if (q && !state.searchMode) list = list.filter((e) => searchKey(e).includes(q));
   const dirFirst = (a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : 0);
   const dirMul = state.sortDir === 'desc' ? -1 : 1;
   const byNum = (key) => (a, b) => ((a[key] || 0) - (b[key] || 0)) * dirMul || compareName(a, b);
@@ -889,11 +890,14 @@ function bindListColumnResize(head) {
 function syncFilterUi(force = false) {
   const inp = $('#file-filter');
   const clear = $('#file-filter-clear');
+  const recursive = $('#file-search-recursive');
   if (!inp || !clear) return;
-  if (force || document.activeElement !== inp) inp.value = state.filter || '';
-  clear.classList.toggle('show', !!state.filter);
+  if (force || document.activeElement !== inp) inp.value = state.searchMode ? state.searchQuery : (state.filter || '');
+  clear.classList.toggle('show', !!state.filter || !!state.searchMode);
+  if (recursive) recursive.classList.toggle('active', !!state.searchMode);
 }
 function setFileFilter(q) {
+  exitSearchMode(false);
   state.filter = String(q || '').trim();
   state.selected = null;
   state.multiSel.clear();
@@ -903,8 +907,55 @@ function setFileFilter(q) {
   syncFilterUi();
   renderFiles();
 }
+function exitSearchMode(render = true) {
+  if (!state.searchMode && !state.searchQuery && !state.searchRoot && !state.searchTruncated) return false;
+  if (state.searchBaseEntries) state.entries = state.searchBaseEntries;
+  state.searchMode = false;
+  state.searchQuery = '';
+  state.searchRoot = '';
+  state.searchTruncated = false;
+  state.searchBaseEntries = null;
+  if (render) {
+    syncFilterUi(true);
+    renderFiles();
+  }
+  return true;
+}
+async function searchCurrentTree() {
+  if (!state.cwd || state.skillsMode || state.virtualMode) return;
+  const term = String($('#file-filter')?.value || state.filter || '').trim();
+  if (!term) { focusFileFilter(); return; }
+  const root = state.cwd;
+  state.filter = '';
+  state.searchBaseEntries = state.searchMode ? (state.searchBaseEntries || state.entries) : state.entries;
+  state.selected = null;
+  state.multiSel.clear();
+  state.selectionAnchor = null;
+  state.cursor = -1;
+  state.typeAhead = { text: '', ts: 0 };
+  $('#file-area').innerHTML = `<div class="cmdk-loading">搜索子文件夹「${escapeHtml(term)}」…</div>`;
+  try {
+    const data = await api('/api/search?q=' + encodeURIComponent(term) + '&root=' + encodeURIComponent(root));
+    state.searchMode = true;
+    state.searchQuery = term;
+    state.searchRoot = root;
+    state.searchTruncated = !!data.truncated;
+    state.recentMode = false;
+    state.skillsMode = false;
+    state.virtualMode = null;
+    state.entries = prepareEntries((data.results || []).map((e) => ({ ...e, hidden: false })));
+    state.sort = 'mtime';
+    state.sortDir = 'desc';
+    syncSortControls();
+    syncFilterUi(true);
+    renderFiles();
+    toast(`已搜索子文件夹：${term}`);
+  } catch (err) {
+    toast('搜索子文件夹失败：' + err.message, true);
+  }
+}
 function clearFileFilterFromKeyboard() {
-  if (!state.filter) return false;
+  if (!state.filter && !state.searchMode) return false;
   setFileFilter('');
   focusFileArea();
   toast('已清空当前目录搜索');
@@ -1058,15 +1109,15 @@ function renderFiles() {
   state.selectionStats = computeSelectionStats();
   renderStatusbar();
   if (!list.length) {
-    const emptyMsg = state.filter ? `没有匹配「${escapeHtml(state.filter)}」的项目` : (state.recentMode ? '没找到最近修改的文件' : '这个文件夹是空的');
-    const emptyIc = state.filter ? 'search' : (state.recentMode ? 'clock' : 'inbox');
+    const emptyMsg = state.searchMode ? `没有搜索到「${escapeHtml(state.searchQuery)}」` : (state.filter ? `没有匹配「${escapeHtml(state.filter)}」的项目` : (state.recentMode ? '没找到最近修改的文件' : '这个文件夹是空的'));
+    const emptyIc = (state.filter || state.searchMode) ? 'search' : (state.recentMode ? 'clock' : 'inbox');
     area.innerHTML = `<div class="empty-state"><div class="big">${ic(emptyIc, 'currentColor', 48)}</div>${emptyMsg}</div>`;
     return;
   }
   const chunked = list.length > LARGE_RENDER_THRESHOLD;
   const firstBatch = chunked ? Math.min(FIRST_RENDER_BATCH, list.length) : list.length;
   // 最近修改是跨目录平铺列表，强制列表视图并显示来源目录
-  if (state.recentMode || state.view === 'list') {
+  if (state.recentMode || state.searchMode || state.view === 'list') {
     applyListColVars();
     const wrap = document.createElement('div');
     wrap.className = 'list';
@@ -1082,6 +1133,7 @@ function renderFiles() {
     const finishList = () => {
       if (seq !== state.renderSeq) return;
       if (state.recentMode && state.recentTruncated) area.insertAdjacentHTML('beforeend', truncNote());
+      if (state.searchMode && state.searchTruncated) area.insertAdjacentHTML('beforeend', `<div class="trunc-note">⚠ 搜索结果可能不完整。换更具体的关键词或进入更具体的子目录再搜索。</div>`);
       paintSelection(true);
       paintCutMarks(true);
       highlightCursor(true);
@@ -1216,8 +1268,8 @@ function listRow(e, i) {
   el.dataset.idx = i;
   el.dataset.path = e.path;
   if (chgR) { el.dataset.changed = chgR.count > 1 ? '改·' + chgR.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chgR.count * 0.12).toFixed(2)); if (chgR.files.size) el.title = '刚变更：\n' + [...chgR.files].join('\n'); }
-  // 最近修改是跨目录列表，名称后缀显示来源目录，方便区分同名文件
-  const dirHint = state.recentMode ? ` <span class="row-dir">· ${escapeHtml(tilde(e.dir || dirOf(e.path)))}</span>` : '';
+  // 最近修改/搜索结果是跨目录列表，名称后缀显示来源目录，方便区分同名文件
+  const dirHint = (state.recentMode || state.searchMode) ? ` <span class="row-dir">· ${escapeHtml(tilde(e.dir || dirOf(e.path)))}</span>` : '';
   const thumbSrc = `/api/thumb?path=${encodeURIComponent(e.path)}&w=96&v=${e.mtime || 0}`;
   el.innerHTML = `<div class="icon">${(e.kind === 'image' || e.kind === 'video') ? `<img class="thumb-sm js-lazy-thumb" loading="lazy" decoding="async" src="${THUMB_PLACEHOLDER}" data-src="${escapeHtml(thumbSrc)}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'svg-icon',innerHTML:this.dataset.fb||''}))" data-fb='${escapeHtml(iconSvg(e, 18))}'>` : `<span class="svg-icon">${iconSvg(e, 18)}</span>`}</div>
     <div class="fname">${escapeHtml(e.name)}${projBadge(e)}${dirHint}</div>
@@ -3778,6 +3830,7 @@ async function loadDrives() {
 }
 async function openThisPcView(pushHistory = true) {
   if (!await guardDirty()) return;
+  exitSearchMode(false);
   if (!state.drives.length) await loadDrives();
   if (pushHistory && state.cwd && state.cwd !== 'this-pc') {
     state.history.push(state.cwd);
@@ -3934,6 +3987,7 @@ async function loadAgentProjects() {
 // 结果写进统一数据源 state.entries，交给 renderFiles 渲染——这样筛选 / 排序 / 隐藏开关
 // 都能直接作用在最近列表上，不会把视图无声切回上一个目录
 async function showRecent() {
+  exitSearchMode(false);
   state.recentMode = true;
   state.virtualMode = null;
   state.filter = '';
@@ -4296,9 +4350,14 @@ function bindEvents() {
   $('#toggle-hidden').onchange = (e) => toggleHiddenFiles(e.target.checked);
   $('#file-filter').oninput = (e) => setFileFilter(e.target.value);
   $('#file-filter').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      searchCurrentTree();
+      return;
+    }
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (state.filter) {
+      if (state.filter || state.searchMode) {
         e.target.value = '';
         setFileFilter('');
       }
@@ -4306,6 +4365,7 @@ function bindEvents() {
       e.target.blur();
     }
   });
+  $('#file-search-recursive').onclick = () => searchCurrentTree();
   $('#file-filter-clear').onclick = () => { setFileFilter(''); focusFileFilter(); };
   syncFilterUi();
 
