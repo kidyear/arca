@@ -1503,6 +1503,17 @@ function currentEntry() {
   if (state.visible[state.cursor]) return state.visible[state.cursor];
   return state.selected ? state.entryByPath.get(state.selected) : null;
 }
+function selectedOrCurrentEntries() {
+  const items = selEntries();
+  const cur = currentEntry();
+  if (!items.length && cur) items.push(cur);
+  return items;
+}
+function mutableSelectedEntries() {
+  const items = selectedOrCurrentEntries();
+  if (items.some((it) => it.isDrive)) { toast('不能对盘符执行文件操作', true); return []; }
+  return items;
+}
 function computeSelectionStats(paths = selPaths()) {
   let count = 0; let dirs = 0; let bytes = 0;
   for (const p of paths) {
@@ -2898,6 +2909,7 @@ async function mdEditor(e, data, mode = 'rich') {
   await render(mode);
 }
 async function doRename(e, opts = {}) {
+  if (e.isDrive) { toast('盘符不能重命名', true); return null; }
   const area = $('#file-area');
   const row = area.querySelector(`[data-path="${CSS.escape(e.path)}"]`);
   const nameEl = row && row.querySelector('.fname');
@@ -2983,6 +2995,7 @@ async function trashSelection() {
   let items = selEntries();
   const cur = currentEntry();
   if (!items.length && cur) items = [cur];
+  if (items.some((it) => it.isDrive)) { toast('不能对盘符执行文件操作', true); return []; }
   if (!items.length) return;
   if (items.length === 1) return doTrash(items[0]);
   const nextIdx = Math.min(...items.map((it) => state.visible.findIndex((e) => e.path === it.path)).filter((i) => i >= 0));
@@ -3005,6 +3018,7 @@ async function deleteSelectionPermanent() {
   let items = selEntries();
   const cur = currentEntry();
   if (!items.length && cur) items = [cur];
+  if (items.some((it) => it.isDrive)) { toast('不能对盘符执行文件操作', true); return []; }
   if (!items.length) return;
   if (items.length === 1) return doDeletePermanent(items[0]);
   const nextIdx = Math.min(...items.map((it) => state.visible.findIndex((e) => e.path === it.path)).filter((i) => i >= 0));
@@ -3023,7 +3037,8 @@ async function deleteSelectionPermanent() {
   if (Number.isFinite(nextIdx)) selectNearestIndex(nextIdx);
 }
 async function clipSet(op) {
-  const paths = selPaths();
+  const entries = mutableSelectedEntries();
+  const paths = entries.map((e) => e.path);
   if (!paths.length) return;
   setFileClip(op, paths);
   paintCutMarks();
@@ -3069,6 +3084,7 @@ async function clipPaste(dstDir) {
 }
 
 async function doTrash(e) {
+  if (e.isDrive) { toast('不能删除盘符', true); return; }
   // 文件秒删（花叔的选择），但删整个文件夹给一次轻确认——误删项目目录代价高
   const nextIdx = state.visible.findIndex((x) => x.path === e.path);
   if (e.isDir) {
@@ -3084,6 +3100,7 @@ async function doTrash(e) {
   if (nextIdx >= 0) selectNearestIndex(nextIdx);
 }
 async function doDeletePermanent(e) {
+  if (e.isDrive) { toast('不能永久删除盘符', true); return; }
   const nextIdx = state.visible.findIndex((x) => x.path === e.path);
   const ok = await confirmDialog(`永久删除「${e.name}」？不会进入废纸篓。`);
   if (!ok) return;
@@ -3430,9 +3447,46 @@ async function diskPanel(dirPath) {
 
 // 右键上下文菜单
 function closeContextMenu() { const m = $('#context-menu'); if (m) m.remove(); }
+function mixedDriveSelectionContextItems(ev) {
+  const entries = selEntries();
+  const paths = entries.map((it) => it.path);
+  const items = [
+    { label: `复制 ${paths.length} 个路径`, fn: () => copyPaths(paths) },
+  ];
+  if (ev.shiftKey) items.push({ label: '复制为路径', fn: () => copyPathsQuoted(paths) });
+  items.push(
+    { sep: true },
+    { label: '属性', fn: () => propertiesPanel(entries) },
+    { sep: true },
+    { label: '清空选择', fn: () => clearSelection() },
+  );
+  return items;
+}
+function driveContextItems(e, ev) {
+  const items = [
+    { label: '打开', fn: () => navigate(e.path) },
+    { label: '在新标签页打开', fn: () => openFolderInNewTab(e.path) },
+    { label: '在新窗口打开', fn: () => openNewWindow(e.path) },
+    { sep: true },
+    { label: '复制路径', fn: () => copyPaths([e.path]) },
+  ];
+  if (ev.shiftKey) items.push({ label: '复制为路径', fn: () => copyPathsQuoted([e.path]) });
+  items.push(
+    { label: '在终端打开', fn: () => term.openInDir(e.path) },
+    { label: '磁盘占用透视', fn: () => diskPanel(e.path) },
+    { sep: true },
+    { label: '属性', fn: () => propertiesPanel([e]) },
+  );
+  return items;
+}
 function showContextMenu(ev, e) {
   ev.preventDefault();
   closeContextMenu();
+  if (e.isDrive) { popupMenu(ev, driveContextItems(e, ev)); return; }
+  if (state.multiSel.size > 1 && state.multiSel.has(e.path) && selEntries().some((it) => it.isDrive)) {
+    popupMenu(ev, mixedDriveSelectionContextItems(ev));
+    return;
+  }
   // 右键落在多选集合里 → 组操作菜单;落在选区外 → 选区重置为该项(资源管理器习惯)
   if (state.multiSel.size > 1 && state.multiSel.has(e.path)) {
     const n = state.multiSel.size;
@@ -4365,7 +4419,7 @@ function bindEvents() {
     else if (e.key === 'Backspace' && trimTypeAhead()) { e.preventDefault(); }
     else if (e.key === 'Backspace') { e.preventDefault(); goBackspace(); }
     else if (e.key === ' ') { e.preventDefault(); if (mod) toggleCursorSelection(); else selectCursorEntry(); }
-    else if (e.key === 'F2') { e.preventDefault(); const it = currentEntry(); if (it) doRename(it); }
+    else if (e.key === 'F2') { e.preventDefault(); const it = currentEntry(); if (it && it.isDrive) return; if (it) doRename(it); }
     else if (!e.altKey && !mod && !e.isComposing && e.key.length === 1 && e.key !== ' ') {
       if (selectByTypeAhead(e.key.toLocaleLowerCase('zh'))) e.preventDefault();
     }

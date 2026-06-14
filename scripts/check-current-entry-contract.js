@@ -25,6 +25,6 @@ assertIncludes('trashSelection', sliceFunction(app, 'trashSelection'), 'currentE
 assertIncludes('deleteSelectionPermanent', sliceFunction(app, 'deleteSelectionPermanent'), 'currentEntry()');
 assertIncludes('showPropertiesSelection', sliceFunction(app, 'showPropertiesSelection'), 'currentEntry()');
 assertIncludes('openKeyboardContextMenu', sliceFunction(app, 'openKeyboardContextMenu'), 'currentEntry()');
-assertIncludes('keydown', app, 'const it = currentEntry(); if (it) doRename(it);');
+assertIncludes('keydown', app, 'const it = currentEntry(); if (it && it.isDrive) return; if (it) doRename(it);');
 
 console.log('current-entry contract ok');
