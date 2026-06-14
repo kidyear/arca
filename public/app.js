@@ -592,6 +592,14 @@ function stepFolderTab(direction) {
   const next = (idx + direction + state.folderTabs.length) % state.folderTabs.length;
   switchFolderTab(state.folderTabs[next].id);
 }
+function jumpFolderTab(slot) {
+  if (!state.folderTabs.length) return false;
+  const idx = slot === 9 ? state.folderTabs.length - 1 : slot - 1;
+  const tab = state.folderTabs[Math.max(0, Math.min(state.folderTabs.length - 1, idx))];
+  if (!tab || tab.id === state.activeFolderTab) return false;
+  switchFolderTab(tab.id);
+  return true;
+}
 // 汇总当前要监听的目录：浏览目录 + 每个终端会话的项目目录，发给主进程做增量监听
 function updateWatches() {
   if (!window.fanboxFs) return;
@@ -4172,6 +4180,7 @@ function bindEvents() {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'w' || e.key === 'W') && !inInput) { e.preventDefault(); closeFolderTab(state.activeFolderTab); return; }
     if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B') && !inInput) { e.preventDefault(); toggleSidebar(); return; }
     if (inInput) return;
+    if (handleFolderTabNumberShortcut(e)) return;
     if (e.key === 'F5') { e.preventDefault(); refreshDir(true); return; }
     if (mod && !e.shiftKey && !e.altKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); refreshDir(true); return; }
     // 文件剪贴板与全选(资源管理器习惯)
@@ -4299,6 +4308,21 @@ function handleExplorerViewShortcut(e) {
     return true;
   }
   return false;
+}
+function handleFolderTabNumberShortcut(e) {
+  const plainCtrl = e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
+  if (!plainCtrl || state.skillsMode) return false;
+  const key = e.code || e.key;
+  if (key === 'Digit9' || e.key === '9') {
+    e.preventDefault();
+    jumpFolderTab(9);
+    return true;
+  }
+  const match = /^Digit([1-9])$/.exec(key) || (/^[1-9]$/.test(e.key) ? [, e.key] : null);
+  if (!match) return false;
+  e.preventDefault();
+  jumpFolderTab(Number(match[1]));
+  return true;
 }
 
 // ---------- 主题 / 皮肤 ----------
