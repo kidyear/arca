@@ -25,6 +25,8 @@ const UNDO_TRASH_DIR = path.join(CONFIG_DIR, 'undo-trash');
 const PUBLIC = path.join(__dirname, 'public');
 const PLATFORM = process.platform;
 const LISTDIR_STAT_CONCURRENCY = 64;
+const PROJECT_PROBE_CONCURRENCY = 8;
+const PROJECT_PROBE_TIMEOUT_MS = 120;
 
 // 搜索 / 遍历时跳过的重目录，避免 vibe coding 项目里 node_modules 拖垮速度
 const IGNORE_DIRS = new Set([
@@ -148,6 +150,13 @@ async function mapLimit(items, limit, worker) {
   return out;
 }
 
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+
 async function readConfig() {
   try {
     const raw = await fsp.readFile(CONFIG_FILE, 'utf8');
@@ -231,12 +240,12 @@ async function listDir(dirPath) {
   // 成本受控：只探目录、且总数封顶；大目录（>80 个子目录）跳过，避免拖慢列表
   const subDirs = entries.filter((e) => e.isDir && !e.name.startsWith('.'));
   if (subDirs.length <= 80) {
-    await Promise.all(subDirs.map(async (e) => {
+    await mapLimit(subDirs, PROJECT_PROBE_CONCURRENCY, async (e) => {
       try {
-        const inner = await fsp.readdir(e.path);
+        const inner = await withTimeout(fsp.readdir(e.path), PROJECT_PROBE_TIMEOUT_MS);
         e.project = projectOf(new Set(inner));
       } catch { /* 无权限等，跳过 */ }
-    }));
+    });
   }
 
   return { path: dir, parent: path.dirname(dir), entries, breadcrumb: breadcrumbForPath(dir), project };
