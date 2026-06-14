@@ -1652,14 +1652,20 @@ try {
   $max=[int]$env:FANBOX_THUMB_SIZE
   $r=[Math]::Min(1.0,[Math]::Min($max/$img.Width,$max/$img.Height))
   $w=[Math]::Max(1,[int]($img.Width*$r)); $h=[Math]::Max(1,[int]($img.Height*$r))
-  $bmp=New-Object System.Drawing.Bitmap($w,$h)
+  $bmp=New-Object System.Drawing.Bitmap($w,$h,[System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $g=[System.Drawing.Graphics]::FromImage($bmp)
   $g.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  if ($env:FANBOX_THUMB_FORMAT -eq 'png') { $g.Clear([System.Drawing.Color]::Transparent) } else { $g.Clear([System.Drawing.Color]::White) }
   $g.DrawImage($img,0,0,$w,$h); $g.Dispose()
-  $codec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
-  $ep=New-Object System.Drawing.Imaging.EncoderParameters(1)
-  $ep.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality,[long]82)
-  $bmp.Save($env:FANBOX_THUMB_DST,$codec,$ep); $bmp.Dispose()
+  if ($env:FANBOX_THUMB_FORMAT -eq 'png') {
+    $bmp.Save($env:FANBOX_THUMB_DST,[System.Drawing.Imaging.ImageFormat]::Png)
+  } else {
+    $codec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+    $ep=New-Object System.Drawing.Imaging.EncoderParameters(1)
+    $ep.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality,[long]82)
+    $bmp.Save($env:FANBOX_THUMB_DST,$codec,$ep)
+  }
+  $bmp.Dispose()
 } finally { $img.Dispose() }
 `;
 // macOS：图片走 sips 缩放（快）；视频/PDF/其它走 qlmanage QuickLook 抽帧。
@@ -1668,8 +1674,9 @@ async function generateThumb(src, e, size, cacheFile, isImg) {
   await fsp.mkdir(THUMB_DIR, { recursive: true });
   if (PLATFORM === 'win32') {
     if (!isImg) throw new Error('no thumb backend on win32');
+    const outFormat = cacheFile.endsWith('.png') ? 'png' : 'jpeg';
     await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_THUMB_SCRIPT], {
-      env: { ...process.env, FANBOX_THUMB_SRC: src, FANBOX_THUMB_DST: cacheFile, FANBOX_THUMB_SIZE: String(size) },
+      env: { ...process.env, FANBOX_THUMB_SRC: src, FANBOX_THUMB_DST: cacheFile, FANBOX_THUMB_SIZE: String(size), FANBOX_THUMB_FORMAT: outFormat },
       windowsHide: true,
     });
     return;
