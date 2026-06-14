@@ -606,11 +606,74 @@ function setFileFilter(q) {
   syncFilterUi();
   renderFiles();
 }
+function clearFileFilterFromKeyboard() {
+  if (!state.filter) return false;
+  setFileFilter('');
+  focusFileArea();
+  toast('已清空当前目录搜索');
+  return true;
+}
 function focusFileFilter() {
   const inp = $('#file-filter');
   if (!inp || state.skillsMode) return;
   inp.focus();
   inp.select();
+}
+function focusFileArea() {
+  const area = $('#file-area');
+  if (!area || state.skillsMode) return;
+  if (state.cursor < 0 && state.visible.length) {
+    state.cursor = state.selected ? state.visible.findIndex((e) => e.path === state.selected) : 0;
+    if (state.cursor < 0) state.cursor = 0;
+    highlightCursor(true);
+  }
+  $('#file-area').focus();
+}
+function focusPreviewPane() {
+  if (!previewVisible()) return false;
+  $('#preview-body').focus();
+  return true;
+}
+function focusDockPanel() {
+  const panel = $('#terminal-panel');
+  if (!panel || panel.classList.contains('hidden')) return false;
+  if (panel.classList.contains('chat-mode')) {
+    const input = $('#chat-input');
+    if (input) { $('#chat-input').focus(); return true; }
+  }
+  const s = typeof term !== 'undefined' ? term.sessions.find((x) => x.id === term.active) : null;
+  if (s && s.xterm) { s.xterm.focus(); return true; }
+  const button = panel.querySelector('button:not([disabled])');
+  if (button) { button.focus(); return true; }
+  return false;
+}
+function currentFocusZone() {
+  const active = document.activeElement;
+  if (!active) return 'files';
+  if (active.classList && active.classList.contains('addr-input')) return 'address';
+  if (active === $('#file-filter') || active.closest('.top-search')) return 'search';
+  if (active === $('#file-area') || active.closest('#file-area') || active.closest('#content')) return 'files';
+  if (active.closest('#preview')) return 'preview';
+  if (active.closest('#terminal-panel')) return 'dock';
+  if (active.closest('#breadcrumb')) return 'address';
+  return 'files';
+}
+function focusFileManagerZone(zone) {
+  if (zone === 'address') { beginAddressEdit(); return; }
+  if (zone === 'search') { focusFileFilter(); return; }
+  if (zone === 'preview') { focusPreviewPane(); return; }
+  if (zone === 'dock') { focusDockPanel(); return; }
+  focusFileArea();
+}
+function cycleFileManagerFocus(backward = false) {
+  const zones = ['address', 'files', 'search'];
+  if (previewVisible()) zones.push('preview');
+  const dock = $('#terminal-panel');
+  if (dock && !dock.classList.contains('hidden')) zones.push('dock');
+  const current = currentFocusZone();
+  const i = zones.indexOf(current);
+  const next = i < 0 ? 0 : (i + (backward ? -1 : 1) + zones.length) % zones.length;
+  focusFileManagerZone(zones[next]);
 }
 // 底部状态条：当前文件夹的基础信息小字常驻，「占用透视」入口也安在这
 function renderStatusbar() {
@@ -1315,15 +1378,13 @@ function extendCursor(d) {
   const cur = state.cursor >= 0 ? state.cursor : 0;
   extendCursorTo(cur + d);
 }
-function selectByTypeAhead(ch) {
-  if (!state.visible.length || state.skillsMode) return false;
-  const now = Date.now();
+function typeAheadFresh() {
   const last = state.typeAhead || { text: '', ts: 0 };
-  const sameCycle = now - last.ts < 1000 && last.text.length === 1 && last.text === ch;
-  const text = now - last.ts > 1000 || sameCycle ? ch : (last.text + ch);
-  state.typeAhead = { text, ts: now };
+  return !!(last.text && Date.now() - last.ts < 1000);
+}
+function findTypeAheadMatch(text, start = 0) {
+  if (!text || !state.visible.length) return false;
   const q = text.toLocaleLowerCase('zh');
-  const start = sameCycle || state.cursor >= 0 ? state.cursor + 1 : 0;
   for (let n = 0; n < state.visible.length; n++) {
     const idx = (start + n) % state.visible.length;
     const e = state.visible[idx];
@@ -1338,6 +1399,28 @@ function selectByTypeAhead(ch) {
     }
   }
   return false;
+}
+function selectByTypeAhead(ch) {
+  if (!state.visible.length || state.skillsMode) return false;
+  const now = Date.now();
+  const last = state.typeAhead || { text: '', ts: 0 };
+  const sameCycle = now - last.ts < 1000 && last.text.length === 1 && last.text === ch;
+  const text = now - last.ts > 1000 || sameCycle ? ch : (last.text + ch);
+  state.typeAhead = { text, ts: now };
+  const start = sameCycle || state.cursor >= 0 ? state.cursor + 1 : 0;
+  return findTypeAheadMatch(text, start);
+}
+function trimTypeAhead() {
+  if (!typeAheadFresh()) return false;
+  const last = state.typeAhead || { text: '', ts: 0 };
+  const text = last.text.slice(0, -1);
+  if (!text) {
+    state.typeAhead = { text: '', ts: 0 };
+    return true;
+  }
+  state.typeAhead = { text, ts: Date.now() };
+  findTypeAheadMatch(text, 0);
+  return true;
 }
 function cursorEnter(editor) {
   const e = currentEntry();
@@ -3601,7 +3684,7 @@ function bindEvents() {
   syncSortControls();
   $('#view-seg').querySelectorAll('button').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === state.view);
-    b.onclick = () => { state.view = b.dataset.view; localStorage.setItem('fb_view', state.view); $('#view-seg').querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b)); updateGridSizeVisibility(); renderFiles(); };
+    b.onclick = () => setFileView(b.dataset.view);
   });
   $('#gridsize-seg').querySelectorAll('button').forEach((b) => {
     b.onclick = () => setGridSize(b.dataset.size);
@@ -3638,6 +3721,7 @@ function bindEvents() {
     if (lbOpen) { if (e.key === 'Escape') document.querySelector('.lightbox').remove(); return; }
     if (imgEditState && (e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); ieUndo(imgEditState); return; }
     const inInput = isEditingTarget(document.activeElement);
+    if (e.key === 'F6') { e.preventDefault(); cycleFileManagerFocus(e.shiftKey); return; }
     if (!inInput && (e.key === 'BrowserBack' || e.key === 'GoBack')) { e.preventDefault(); goBack(); return; }
     if (!inInput && (e.key === 'BrowserForward' || e.key === 'GoForward')) { e.preventDefault(); goForward(); return; }
     if (!inInput && (e.metaKey || e.ctrlKey) && ['f', 'F', 'e', 'E'].includes(e.key)) { e.preventDefault(); focusFileFilter(); return; }
@@ -3646,6 +3730,7 @@ function bindEvents() {
     }
     // 输入框里按 Esc 先退出输入，别越级把预览关掉
     if (e.key === 'Escape' && inInput) { document.activeElement.blur(); return; }
+    if (e.key === 'Escape' && !inInput && clearFileFilterFromKeyboard()) return;
     // 选择态按 Esc 先清选择，再考虑关闭预览（资源管理器习惯）
     if (e.key === 'Escape' && (state.multiSel.size || state.selected)) { clearSelection(); return; }
     if (e.key === 'Escape' && !$('#preview').classList.contains('hidden')) { closePreview(false); return; }
@@ -3662,6 +3747,8 @@ function bindEvents() {
     if (e.key === 'F5') { e.preventDefault(); refreshDir(true); return; }
     const mod = e.metaKey || e.ctrlKey;
     // 文件剪贴板与全选(资源管理器习惯)
+    if (handleExplorerViewShortcut(e)) return;
+    if (handleGridSizeShortcut(e)) return;
     if (mod && ((e.key === 'y' || e.key === 'Y') || (e.shiftKey && (e.key === 'z' || e.key === 'Z')))) { e.preventDefault(); redoLast(); return; }
     if (mod && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undoLast(); return; }
     if (mod && !e.shiftKey && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); openNewWindow(state.cwd); return; }
@@ -3701,6 +3788,7 @@ function bindEvents() {
     else if (e.shiftKey && e.key === 'Delete') { e.preventDefault(); deleteSelectionPermanent(); }
     else if (mod && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); trashSelection(); }
     else if (e.key === 'Delete') { e.preventDefault(); trashSelection(); } // Windows:Delete=回收站
+    else if (e.key === 'Backspace' && trimTypeAhead()) { e.preventDefault(); }
     else if (e.key === 'Backspace') { e.preventDefault(); goBackspace(); }
     else if (e.key === ' ') { e.preventDefault(); if (mod) toggleCursorSelection(); else selectCursorEntry(); }
     else if (e.key === 'F2') { e.preventDefault(); const it = currentEntry(); if (it) doRename(it); }
@@ -3711,6 +3799,14 @@ function bindEvents() {
 }
 function updateGridSizeVisibility() {
   $('#gridsize-seg').style.display = state.view === 'grid' ? '' : 'none';
+}
+function setFileView(view, rerender = true) {
+  if (!['grid', 'list'].includes(view) || state.view === view) return;
+  state.view = view;
+  localStorage.setItem('fb_view', state.view);
+  $('#view-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
+  updateGridSizeVisibility();
+  if (rerender) renderFiles();
 }
 function syncGridSizeControls() {
   $('#gridsize-seg').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.size === state.gridSize));
@@ -3727,6 +3823,54 @@ function stepGridSize(delta) {
   const i = Math.max(0, sizes.indexOf(state.gridSize));
   const next = sizes[Math.max(0, Math.min(sizes.length - 1, i + delta))];
   setGridSize(next);
+}
+function handleGridSizeShortcut(e) {
+  if (state.view !== 'grid' || state.recentMode || state.skillsMode) return false;
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return false;
+  if (e.key === '+' || e.key === '=') {
+    e.preventDefault();
+    stepGridSize(1);
+    return true;
+  }
+  if (e.key === '-') {
+    e.preventDefault();
+    stepGridSize(-1);
+    return true;
+  }
+  if (e.key === '0') {
+    e.preventDefault();
+    setGridSize('md');
+    return true;
+  }
+  return false;
+}
+function handleExplorerViewShortcut(e) {
+  if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey || state.recentMode || state.skillsMode) return false;
+  const key = e.code || e.key;
+  if (key === 'Digit1' || e.key === '1') {
+    e.preventDefault();
+    setFileView('grid');
+    setGridSize('lg');
+    return true;
+  }
+  if (key === 'Digit2' || e.key === '2') {
+    e.preventDefault();
+    setFileView('grid');
+    setGridSize('md');
+    return true;
+  }
+  if (key === 'Digit3' || e.key === '3') {
+    e.preventDefault();
+    setFileView('grid');
+    setGridSize('sm');
+    return true;
+  }
+  if (key === 'Digit6' || e.key === '6') {
+    e.preventDefault();
+    setFileView('list');
+    return true;
+  }
+  return false;
 }
 
 // ---------- 主题 / 皮肤 ----------
