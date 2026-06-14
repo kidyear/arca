@@ -3206,6 +3206,38 @@ async function clipPaste(dstDir) {
     paintCutMarks();
   }
 }
+function canPasteShortcut() {
+  return !!((state.fileClip && state.fileClip.op === 'copy' && state.fileClip.paths?.length) || (!state.fileClip && window.fanboxClipboard?.readFiles));
+}
+async function shortcutClipboard() {
+  let clip = state.fileClip;
+  if ((!clip || !clip.paths?.length) && window.fanboxClipboard && window.fanboxClipboard.readFiles) {
+    const r = await window.fanboxClipboard.readFiles().catch((err) => ({ ok: false, paths: [], error: err.message }));
+    if (r.ok && r.paths && r.paths.length) clip = { op: r.op === 'cut' ? 'cut' : 'copy', paths: r.paths, external: true };
+  }
+  return clip;
+}
+async function pasteShortcutFromClipboard(dstDir) {
+  if (isVirtualLocation() && !dstDir) { toast('请先打开一个磁盘或文件夹再粘贴快捷方式', true); return; }
+  const clip = await shortcutClipboard();
+  if (!clip || !clip.paths?.length) return;
+  if (clip.op !== 'copy') { toast('剪切状态不能粘贴快捷方式，请先复制目标项', true); return; }
+  const dst = dstDir || state.cwd;
+  let fail = 0;
+  const created = [];
+  for (const p of clip.paths) {
+    const r = await apiPost('/api/shortcut', { path: p, dstDir: dst }).catch((err) => ({ error: err.message }));
+    if (r.error || !r.ok) fail++;
+    else created.push({ target: p, path: r.path, name: r.name || baseOf(r.path), dstDir: dirOf(r.path) });
+  }
+  if (created.length) {
+    pushUndo({ type: 'shortcut', items: created, label: '粘贴快捷方式' });
+    toast(fail ? `已粘贴 ${created.length} 个快捷方式，${fail} 项失败` : `已粘贴 ${created.length} 个快捷方式`);
+    await refresh();
+    selectVisiblePaths(created.map((it) => it.path));
+  }
+  if (fail && !created.length) toast('粘贴快捷方式失败', true);
+}
 
 async function doTrash(e) {
   if (e.isDrive) { toast('不能删除盘符', true); return; }
@@ -3696,6 +3728,7 @@ function showContextMenu(ev, e) {
   items.push({ label: pathGroup.length > 1 ? `压缩 ${pathGroup.length} 项为 zip` : '压缩为 zip', fn: () => createZipFromEntries(pathGroup.map((p) => state.visible.find((x) => x.path === p)).filter(Boolean)) });
   items.push({ label: pathGroup.length > 1 ? `创建 ${pathGroup.length} 个快捷方式` : '创建快捷方式', fn: () => createShortcutForEntries(pathGroup.map((p) => state.visible.find((x) => x.path === p)).filter(Boolean)) });
   if ((state.fileClip || window.fanboxClipboard?.readFiles) && e.isDir) items.push({ label: `粘贴到「${e.name}」`, fn: () => clipPaste(e.path) });
+  if (canPasteShortcut() && e.isDir) items.push({ label: `粘贴快捷方式到「${e.name}」`, fn: () => pasteShortcutFromClipboard(e.path) });
   items.push({ sep: true });
   items.push({ label: isFav(e.path) ? '取消收藏' : '收藏', fn: () => toggleFav(e) });
   items.push({ label: '重命名…', fn: () => doRename(e) });
@@ -3801,6 +3834,7 @@ function blankContextItems(shiftKey = false) {
     { label: '新建文件…', fn: () => doCreate('file') },
   ];
   if (state.fileClip || window.fanboxClipboard?.readFiles) blank.push({ label: state.fileClip ? `粘贴（${state.fileClip.paths.length} 项）` : '粘贴', fn: () => clipPaste() });
+  if (canPasteShortcut()) blank.push({ label: '粘贴快捷方式', fn: () => pasteShortcutFromClipboard() });
   blank.push({ label: '刷新', fn: () => refreshDir(true) });
   blank.push({ label: '全选', fn: () => selectAllVisible() });
   blank.push({ label: '反向选择', fn: () => invertSelection() });
