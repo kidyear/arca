@@ -3276,6 +3276,31 @@ async function toggleNavSub(li, dirPath, twirl) {
     dirs.forEach((e) => ul.appendChild(navDirLi(e.name, e.path)));
   } catch { ul.remove(); twirl.textContent = '▸'; }
 }
+async function expandSidebarAncestors(cwd) {
+  if (!cwd) return;
+  for (let guard = 0; guard < 24; guard++) {
+    const rows = [...document.querySelectorAll('#sidebar li[data-path]')]
+      .filter((row) => pathContains(row.dataset.path, cwd))
+      .sort((a, b) => normSidebarPath(a.dataset.path).length - normSidebarPath(b.dataset.path).length);
+    const row = rows.find((li) => {
+      if (normSidebarPath(li.dataset.path) === normSidebarPath(cwd)) return false;
+      const next = li.nextElementSibling;
+      return !(next && next.classList.contains('nav-sub'));
+    });
+    if (!row) return;
+    const twirl = row.querySelector('.twirl');
+    if (!twirl) return;
+    await toggleNavSub(row, row.dataset.path, twirl);
+  }
+}
+async function locateCurrentInSidebar() {
+  if (!state.cwd || state.recentMode || state.skillsMode) return;
+  toggleSidebar(false);
+  await expandSidebarAncestors(state.cwd);
+  renderSidebarActive();
+  const active = document.querySelector('#sidebar li.active[data-path]');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
 function networkLocationLi() {
   const li = document.createElement('li');
   li.className = 'network-location-add';
@@ -3861,11 +3886,13 @@ function bindEvents() {
     if (lbOpen) { if (e.key === 'Escape') document.querySelector('.lightbox').remove(); return; }
     if (imgEditState && (e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); ieUndo(imgEditState); return; }
     const inInput = isEditingTarget(document.activeElement);
+    const mod = e.metaKey || e.ctrlKey;
     if (e.key === 'F6') { e.preventDefault(); cycleFileManagerFocus(e.shiftKey); return; }
     if (!inInput && (e.key === 'BrowserBack' || e.key === 'GoBack')) { e.preventDefault(); goBack(); return; }
     if (!inInput && (e.key === 'BrowserForward' || e.key === 'GoForward')) { e.preventDefault(); goForward(); return; }
     if (!inInput && e.key === 'F3') { e.preventDefault(); focusFileFilter(); return; }
-    if (!inInput && (e.metaKey || e.ctrlKey) && ['f', 'F', 'e', 'E'].includes(e.key)) { e.preventDefault(); focusFileFilter(); return; }
+    if (!inInput && mod && e.shiftKey && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); locateCurrentInSidebar(); return; }
+    if (!inInput && mod && !e.shiftKey && ['f', 'F', 'e', 'E'].includes(e.key)) { e.preventDefault(); focusFileFilter(); return; }
     if (!inInput && ((e.ctrlKey && (e.key === 'l' || e.key === 'L')) || (e.altKey && (e.key === 'd' || e.key === 'D')) || e.key === 'F4')) {
       e.preventDefault(); beginAddressEdit(); return;
     }
@@ -3887,7 +3914,6 @@ function bindEvents() {
     if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B') && !inInput) { e.preventDefault(); toggleSidebar(); return; }
     if (inInput) return;
     if (e.key === 'F5') { e.preventDefault(); refreshDir(true); return; }
-    const mod = e.metaKey || e.ctrlKey;
     if (mod && !e.shiftKey && !e.altKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); refreshDir(true); return; }
     // 文件剪贴板与全选(资源管理器习惯)
     if (handleExplorerViewShortcut(e)) return;
