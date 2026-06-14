@@ -11,6 +11,19 @@
 
 ## [Unreleased]
 
+## [1.0.13] - 2026-06-14
+
+### Added
+- 文件夹标签页补齐 Windows Explorer 常用入口：标签栏“+”按钮、标签栏空白双击新建标签。
+- 标签页支持接收内部/系统文件拖放，放下后自动切到目标标签并选中新项。
+- 标签页快捷键继续补齐：Ctrl+1..9 跳转指定标签，Ctrl+PageUp / Ctrl+PageDown 前后切换标签。
+- 视图快捷键补齐 Ctrl+Shift+4 小图标网格、Ctrl+Shift+5 列表视图。
+- Ctrl+Shift+H 可快速显示/隐藏隐藏文件，并与设置勾选、列表刷新保持同步。
+
+### Verified
+- `node --check public/app.js` 与全部 `scripts/check-*.js` 契约脚本通过。
+- 真实 Chrome 冒烟验证标签页新建、编号跳转、拖放目标、隐藏文件切换，以及 Ctrl+PageUp / Ctrl+PageDown 标签页切换。
+
 ## [1.0.12] - 2026-06-14
 
 ### Added
