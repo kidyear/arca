@@ -4,6 +4,7 @@
 const $ = (s) => document.querySelector(s);
 const api = (p) => fetch(p).then((r) => r.json());
 const apiPost = (p, body) => fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+const CHAT_SIDE_WIDTH_KEY = 'arca_chat_side_width';
 
 // ---------- SVG 图标系统（替代 emoji，统一矢量审美） ----------
 const SVG = {
@@ -28,6 +29,7 @@ const SVG = {
   term: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
   clip: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
   pen: '<path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/>',
   edit3: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
   inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
@@ -320,6 +322,128 @@ function toast(msg, isErr) {
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+const CHAT_PATH_RE = /(?:file:\/\/\/[A-Za-z]:\/[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|html?|png|jpe?g|webp|zip)|file:\/\/[^/\s]+\/[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|html?|png|jpe?g|webp|zip)|[A-Za-z]:[\\/][^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|html?|png|jpe?g|webp|zip)|\\\\[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|html?|png|jpe?g|webp|zip))/gi;
+function trimChatPath(raw) {
+  return String(raw || '').trim().replace(/[)\]}>，。；;：:,、]+$/u, '');
+}
+function normalizeChatPath(raw) {
+  const text = trimChatPath(raw);
+  if (!/^file:\/\//i.test(text)) return text;
+  try {
+    const u = new URL(text);
+    const body = decodeURIComponent(u.pathname || '');
+    if (u.hostname) return `\\\\${decodeURIComponent(u.hostname)}${body}`.replace(/\//g, '\\');
+    return body.replace(/^\/([A-Za-z]:)/, '$1').replace(/\//g, '\\');
+  } catch {
+    return text.replace(/^file:\/\/\/?/i, '').replace(/\//g, '\\');
+  }
+}
+function isAbsoluteLocalPath(p) {
+  return /^(?:[A-Za-z]:[\\/]|\\\\|file:\/\/|\/)/i.test(String(p || ''));
+}
+function joinLocalPath(baseDir, rel) {
+  const base = String(baseDir || '').replace(/[\\/]+$/, '');
+  const text = String(rel || '').replace(/^[\\/]+/, '');
+  const sep = state.sep || (base.includes('\\') ? '\\' : '/');
+  if (!base) return text;
+  const unc = base.startsWith('\\\\');
+  const rawParts = ((unc ? base.slice(2) : base) + sep + text).split(/[\\/]+/);
+  const parts = [];
+  rawParts.forEach((part) => {
+    if (!part || part === '.') return;
+    if (part === '..') {
+      const canPop = parts.length > 1 || (parts.length === 1 && !/^[A-Za-z]:$/.test(parts[0]));
+      if (canPop) parts.pop();
+      return;
+    }
+    parts.push(part);
+  });
+  if (unc) return '\\\\' + parts.join('\\');
+  if (/^[A-Za-z]:$/.test(parts[0])) return parts[0] + sep + parts.slice(1).join(sep);
+  return parts.join(sep);
+}
+function resolveChatLocalPath(raw, baseDir = state.cwd) {
+  const text = normalizeChatPath(raw);
+  if (!text || /^(?:https?:|data:|mailto:)/i.test(text)) return '';
+  if (isAbsoluteLocalPath(text)) return text;
+  if (!baseDir) return '';
+  return joinLocalPath(baseDir, text.replace(/^[.][\\/]/, ''));
+}
+async function openChatPathReference(raw) {
+  const p = resolveChatLocalPath(raw) || normalizeChatPath(raw);
+  const st = await api('/api/stat?path=' + encodeURIComponent(p)).catch((err) => ({ ok: false, error: err.message }));
+  if (!st || !st.ok) { toast('没找到路径：' + baseOf(p), true); return; }
+  if (st.isDir) {
+    await navigate(st.path);
+    toast('已打开目录');
+    return;
+  }
+  await navigate(dirOf(st.path));
+  const e = state.entries.find((x) => x.path === st.path) || { path: st.path, name: st.name || baseOf(st.path), kind: kindFromName(st.path), isDir: false, size: st.size || 0, mtime: st.mtime || 0 };
+  applySelection(st.path);
+  openPreview(e);
+  recordRecent(st.path);
+  toast('已打开 ' + baseOf(st.path));
+}
+function chatPathActionNode(raw) {
+  const path = normalizeChatPath(raw);
+  const chip = document.createElement('span');
+  chip.className = 'chat-path-action';
+  chip.dataset.path = path;
+  chip.title = path;
+  const label = document.createElement('button');
+  label.type = 'button';
+  label.className = 'chat-path-open';
+  label.dataset.chatPathAct = 'open';
+  label.textContent = baseOf(path) || path;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'chat-path-copy';
+  copy.dataset.chatPathAct = 'copy';
+  copy.title = '复制路径';
+  copy.textContent = '复制';
+  chip.append(label, copy);
+  chip.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-chat-path-act]');
+    if (!btn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (btn.dataset.chatPathAct === 'copy') copyPath(path);
+    else openChatPathReference(path);
+  });
+  return chip;
+}
+function enhanceChatPathActions(root) {
+  if (!root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest('a, button, pre, code, .chat-path-action')) return NodeFilter.FILTER_REJECT;
+      CHAT_PATH_RE.lastIndex = 0;
+      return CHAT_PATH_RE.test(node.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    },
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach((node) => {
+    const text = node.nodeValue || '';
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    CHAT_PATH_RE.lastIndex = 0;
+    for (;;) {
+      const m = CHAT_PATH_RE.exec(text);
+      if (!m) break;
+      const raw = trimChatPath(m[0]);
+      const end = m.index + raw.length;
+      if (m.index > last) frag.append(document.createTextNode(text.slice(last, m.index)));
+      frag.append(chatPathActionNode(raw));
+      last = end;
+    }
+    if (last < text.length) frag.append(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(frag, node);
+  });
 }
 
 // ---------- 未保存守卫 ----------
@@ -1430,7 +1554,9 @@ function applySelection(path) {
   state.multiSel.clear();
   state.selected = path;
   state.selectionAnchor = path;
+  state.cursor = state.visible.findIndex((e) => e.path === path);
   paintSelection();
+  highlightCursor();
 }
 function selectVisiblePaths(paths) {
   const wanted = new Set((paths || []).filter(Boolean));
@@ -1461,6 +1587,10 @@ function internalDragPaths(dt) {
 }
 function isInternalDrag(dt) {
   return !!(dt && (dt.types.includes('application/x-fanbox-paths') || dt.types.includes('application/x-fanbox-path')));
+}
+function looksLikePath(s) {
+  const p = String(s || '').trim();
+  return !!p && (/^[A-Za-z]:[\\/]/.test(p) || /^\\\\/.test(p) || /^~?[\\/]/.test(p) || /^file:\/\//i.test(p));
 }
 async function dropInternalPathsToDir(paths, dstDir, copy, opts = {}) {
   const norm = (p) => String(p || '').replace(/[\\/]+$/, '');
@@ -1759,7 +1889,8 @@ function previewPlaceholder(e, msg = '这个项目没有可用预览') {
   $('#preview-title').textContent = e.name;
   $('#preview-actions').innerHTML = '';
   renderPreviewFoot(null);
-  $('#preview-body').innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>${escapeHtml(msg)}</div>`;
+  const body = setPreviewBodyMode();
+  body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>${escapeHtml(msg)}</div>`;
 }
 function previewEntry(e) {
   if (!e) return;
@@ -1778,7 +1909,8 @@ function syncPreviewAfterRefresh() {
   $('#preview-title').textContent = '未选择文件';
   $('#preview-actions').innerHTML = '';
   renderPreviewFoot(null);
-  $('#preview-body').innerHTML = `<div class="empty-state"><div class="big">${ic('inbox', 'currentColor', 48)}</div>选择一个文件即可预览</div>`;
+  const body = setPreviewBodyMode();
+  body.innerHTML = `<div class="empty-state"><div class="big">${ic('inbox', 'currentColor', 48)}</div>选择一个文件即可预览</div>`;
 }
 // 单击=选中；预览窗格已打开时才随选择刷新。双击/Enter=进入/打开——跟随资源管理器的肌肉记忆
 function onItemClick(e) {
@@ -1965,15 +2097,24 @@ const docxKit = {
   handle: null, dirty: false, mtime: 0,
   dispose() { if (this.handle) { try { this.handle.destroy(); } catch { /* */ } this.handle = null; } this.dirty = false; },
 };
-async function openDocxPreview(e) {
+function setPreviewBodyMode(mode = '') {
   const body = $('#preview-body');
+  const classes = {
+    docx: 'preview-body office-body docx-body',
+    xlsx: 'preview-body office-body xlsx-body',
+  };
+  body.className = classes[mode] || 'preview-body';
+  return body;
+}
+async function openDocxPreview(e) {
+  const body = setPreviewBodyMode('docx');
   body.innerHTML = '<div class="cmdk-loading">加载 Word 编辑器…</div>';
   try {
     await loadVendor('docx', '/vendor/docx/docx-editor.js', '/vendor/docx/docx-editor.css');
     const r = await fetch(`/api/raw?path=${encodeURIComponent(e.path)}&v=${e.mtime || 0}`);
     if (!r.ok) throw new Error('读取文件失败');
     const buf = await r.arrayBuffer();
-    body.innerHTML = '<div class="editor-bar"><button id="docx-save" class="primary">保存</button><button id="docx-sys" class="ghost-btn">用系统应用打开</button><span id="docx-state" class="editor-hint">原格式（OOXML）编辑，改完点保存</span></div><div id="docx-host" class="docx-host"></div>';
+    body.innerHTML = '<div class="editor-bar docx-save-bar"><button id="docx-save" class="primary">保存</button><button id="docx-sys" class="ghost-btn">用系统应用打开</button><span id="docx-state" class="editor-hint">原格式（OOXML）编辑，改完点保存</span></div><div id="docx-host" class="docx-host"></div>';
     docxKit.mtime = e.mtime || 0;
     docxKit.dirty = false;
     const t0 = Date.now(); // 编辑器装载文档也会触发 onChange，前 1.2 秒不算「用户改动」
@@ -1995,7 +2136,7 @@ async function openDocxPreview(e) {
         const r2 = await apiPost('/api/write-binary', { path: e.path, base64: abToBase64(ab), expectedMtime: docxKit.mtime });
         if (!r2.ok) throw new Error(r2.error || '保存失败');
         docxKit.mtime = r2.mtime; e.mtime = r2.mtime; docxKit.dirty = false;
-        const st = $('#docx-state'); if (st) st.textContent = '已保存 ✓';
+        const st = $('#docx-state'); if (st) st.textContent = '已保存';
         toast('已保存（.docx 原格式，Word 可直接打开）');
         recordRecent(e.path);
       } catch (err) { toast('保存失败: ' + err.message, true); }
@@ -2008,7 +2149,7 @@ async function openDocxPreview(e) {
   }
 }
 async function openXlsxPreview(e) {
-  const body = $('#preview-body');
+  const body = setPreviewBodyMode('xlsx');
   body.innerHTML = '<div class="cmdk-loading">解析表格…</div>';
   try {
     await loadVendor('xlsx', '/vendor/xlsx/xlsx.js');
@@ -2025,7 +2166,8 @@ async function openXlsxPreview(e) {
     sheets.forEach((s, i) => {
       const b = document.createElement('button');
       b.className = 'xlsx-tab';
-      b.textContent = s.name;
+      b.classList.toggle('is-empty', !!s.isEmpty);
+      b.textContent = s.name + (s.isEmpty ? ' · 空' : '');
       b.onclick = () => show(i);
       tabs.appendChild(b);
     });
@@ -2043,7 +2185,7 @@ async function openPreview(e) {
   mona.disposeIfAny(); crepe.disposeIfAny(); docxKit.dispose(); imgEditState = null; // 离开编辑态时回收编辑器（连带 worker），避免泄漏
   showPreviewPanel();
   $('#preview-title').textContent = e.name;
-  const body = $('#preview-body');
+  const body = setPreviewBodyMode();
   body.innerHTML = '<div class="cmdk-loading">加载中…</div>';
   renderPreviewActions(e);
   renderPreviewFoot(e);
@@ -2082,7 +2224,8 @@ async function openPreview(e) {
 }
 function renderTextPreview(data) {
   const body = $('#preview-body');
-  const meta = `<div class="preview-meta"><span>${data.ext || 'txt'}</span><span>${fmtSize(data.size)}</span><span>${fmtTime(data.mtime)}</span></div>`;
+  const enc = data.encoding ? `<span>${escapeHtml(data.encoding.toUpperCase())}</span>` : '';
+  const meta = `<div class="preview-meta"><span>${data.ext || 'txt'}</span><span>${fmtSize(data.size)}</span>${enc}<span>${fmtTime(data.mtime)}</span></div>`;
   const ex = (data.ext || '').toLowerCase();
   if ((ex === 'md' || ex === 'markdown') && !window.__noMarked && window.marked) {
     body.innerHTML = meta + `<div class="md-body">${window.marked.parse(data.content || '')}</div>`;
@@ -6025,12 +6168,63 @@ function aiToolDetail(name, args) {
   const a = args || {};
   return String(a.file_path || a.path || a.command || a.pattern || a.query || a.url || a.description || a.prompt || '').slice(0, 140);
 }
+function chatToolPathFromArgs(name, args = {}) {
+  const p = args.file_path || args.path || '';
+  if (!p) return '';
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read'].includes(name) || args.file_path) return resolveChatLocalPath(p);
+  return '';
+}
+const CHAT_MUTATING_FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+function renderChatToolLine(ev) {
+  const line = document.createElement('div');
+  line.className = 'chat-tool';
+  line.dataset.tool = ev.name;
+  const label = AI_TOOL_LABEL[ev.name] || escapeHtml(ev.name);
+  const detail = escapeHtml(String(aiToolDetail(ev.name, ev.args)).slice(0, 120));
+  line.innerHTML = `<span class="ct-spin">⏳</span> ${label} <code>${detail}</code>`;
+  const toolPath = chatToolPathFromArgs(ev.name, ev.args);
+  if (toolPath) {
+    line.dataset.path = normalizeChatPath(toolPath);
+    line.appendChild(chatPathActionNode(toolPath));
+  }
+  return line;
+}
+function sameDirPath(a, b) {
+  const norm = (p) => String(p || '').replace(/[\\/]+$/, '').toLocaleLowerCase();
+  return !!a && !!b && norm(a) === norm(b);
+}
+async function syncChatToolFileDone(line) {
+  const p = line && line.dataset ? line.dataset.path : '';
+  if (!p) return;
+  if (!CHAT_MUTATING_FILE_TOOLS.has(line.dataset.tool)) return;
+  recordChange(dirOf(p), baseOf(p));
+  if (!sameDirPath(state.cwd, dirOf(p))) return;
+  await refresh();
+  selectVisiblePaths([p]);
+  if (previewVisible()) {
+    const e = state.entries.find((x) => x.path === p);
+    if (e && !e.isDir) openPreview(e);
+  }
+}
+function approvalContentPreview(content) {
+  const text = String(content || '');
+  return `内容预览\n────────\n${text.slice(0, 800)}${text.length > 800 ? '\n…' : ''}`;
+}
+function approvalEditPreview(a) {
+  return `替换预览\n────────\n替换：${String(a.old_string || '(批量)').slice(0, 300)}\n改为：${String(a.new_string || '').slice(0, 300)}`;
+}
 function aiApprovalDetail(name, args) {
   const a = args || {};
-  if (name === 'Write') return `${a.file_path || ''}\n────────\n${String(a.content || '').slice(0, 800)}${String(a.content || '').length > 800 ? '\n…' : ''}`;
-  if (name === 'Edit' || name === 'MultiEdit') return `${a.file_path || ''}\n────────\n替换：${String(a.old_string || '(批量)').slice(0, 300)}\n改为：${String(a.new_string || '').slice(0, 300)}`;
+  if (name === 'Write') return approvalContentPreview(a.content);
+  if (name === 'Edit' || name === 'MultiEdit') return approvalEditPreview(a);
   if (name === 'Bash') return a.command || '';
   return JSON.stringify(a).slice(0, 500);
+}
+function approvalPathFromArgs(name, args = {}) {
+  const p = args.file_path || args.path || '';
+  if (!p) return '';
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read'].includes(name) || args.file_path) return resolveChatLocalPath(p);
+  return '';
 }
 
 // ---------- 任务模板：把高频场景封装成「卡片 + 填空」，员工不用写提示词 ----------
@@ -6236,6 +6430,7 @@ const chat = {
         const md = document.createElement('div');
         md.className = 'md-body chat-md';
         md.innerHTML = window.marked && !window.__noMarked ? window.marked.parse(m.text) : escapeHtml(m.text);
+        enhanceChatPathActions(md);
         a.appendChild(md);
       } else if (m.role === 'tool') {
         const a = box.lastElementChild && box.lastElementChild.classList.contains('assistant') ? box.lastElementChild : this.msgEl('assistant');
@@ -6305,6 +6500,13 @@ const chat = {
       `<div class="ap-title">AI 请求：${AI_TOOL_LABEL[ev.name] || escapeHtml(ev.name)}</div>` +
       `<pre class="ap-detail">${escapeHtml(detail)}</pre>` +
       `<div class="ap-btns"><button class="ap-allow">允许</button><button class="ap-deny">拒绝</button></div>`;
+    const apPath = approvalPathFromArgs(ev.name, ev.args);
+    if (apPath) {
+      const target = document.createElement('div');
+      target.className = 'ap-target';
+      target.appendChild(chatPathActionNode(apPath));
+      card.insertBefore(target, card.querySelector('.ap-detail'));
+    }
     const decide = async (ok) => {
       card.querySelector('.ap-btns').innerHTML = `<span class="ap-state">${ok ? '✓ 已允许' : '✕ 已拒绝'}</span>`;
       card.classList.add(ok ? 'allowed' : 'denied');
@@ -6365,6 +6567,7 @@ const chat = {
       if (!mdBuf) return;
       if (!mdDiv) { mdDiv = document.createElement('div'); mdDiv.className = 'md-body chat-md'; a.appendChild(mdDiv); }
       mdDiv.innerHTML = window.marked && !window.__noMarked ? window.marked.parse(mdBuf) : escapeHtml(mdBuf);
+      enhanceChatPathActions(mdDiv);
       this.scroll();
     };
     const endSegment = () => { if (renderTimer) { clearTimeout(renderTimer); renderMd(); } mdBuf = ''; mdDiv = null; };
@@ -6404,9 +6607,7 @@ const chat = {
       }
       if (ev.type === 'tool') {
         endSegment();
-        const line = document.createElement('div');
-        line.className = 'chat-tool';
-        line.innerHTML = `<span class="ct-spin">⏳</span> ${AI_TOOL_LABEL[ev.name] || escapeHtml(ev.name)} <code>${escapeHtml(String(aiToolDetail(ev.name, ev.args)).slice(0, 120))}</code>`;
+        const line = renderChatToolLine(ev);
         a.appendChild(line);
         toolLines.push(line);
         this.scroll();
@@ -6414,7 +6615,10 @@ const chat = {
       }
       if (ev.type === 'tool_done') {
         const line = toolLines.find((l) => l.querySelector('.ct-spin'));
-        if (line) { line.querySelector('.ct-spin').outerHTML = '<span class="ct-ok">✓</span>'; }
+        if (line) {
+          line.querySelector('.ct-spin').outerHTML = '<span class="ct-ok">✓</span>';
+          syncChatToolFileDone(line).catch(() => {});
+        }
         return;
       }
       if (ev.type === 'approval_done') {
@@ -6469,6 +6673,40 @@ const chat = {
     if (!this.isBusy(this.currentChat)) return;
     fetch('/api/ai/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: this.currentChat }) }).catch(() => {});
   },
+  initSideResize() {
+    const side = $('#chat-side');
+    const host = $('#chat-host');
+    const handle = $('#chat-side-resizer');
+    if (!side || !host || !handle) return;
+    const apply = (w, persist) => {
+      const hostW = host.getBoundingClientRect().width || window.innerWidth;
+      const max = Math.max(180, Math.min(420, hostW - 320));
+      const width = Math.round(Math.min(max, Math.max(132, Number(w) || 168)));
+      document.documentElement.style.setProperty('--chat-side-w', `${width}px`);
+      if (persist) localStorage.setItem(CHAT_SIDE_WIDTH_KEY, String(width));
+    };
+    const saved = Number(localStorage.getItem(CHAT_SIDE_WIDTH_KEY));
+    if (saved) apply(saved, false);
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault();
+      const left = side.getBoundingClientRect().left;
+      document.body.classList.add('chat-side-resizing');
+      try { handle.setPointerCapture(e.pointerId); } catch { /* */ }
+      const move = (ev) => apply(ev.clientX - left, false);
+      const up = (ev) => {
+        apply(ev.clientX - left, true);
+        document.body.classList.remove('chat-side-resizing');
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        try { handle.releasePointerCapture(ev.pointerId); } catch { /* */ }
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+  },
   init() {
     $('#btn-chat').onclick = () => this.toggle();
     $('#mode-chat').onclick = () => setDockMode('chat');
@@ -6482,6 +6720,7 @@ const chat = {
     $('#chat-new').onclick = () => this.newChat();
     $('#chat-tpl').onclick = () => this.newChat(); // 模板挂在新对话的空状态里
     $('#chat-settings').onclick = () => aiSettings.open();
+    this.initSideResize();
     const input = $('#chat-input');
     input.addEventListener('keydown', (e) => {
       e.stopPropagation();
@@ -6493,7 +6732,7 @@ const chat = {
     const host = $('#chat-host');
     host.addEventListener('dragover', (e) => {
       const t = e.dataTransfer.types;
-      if (t.includes('Files') || t.includes('application/x-fanbox-path') || t.includes('text/plain')) {
+      if (t.includes('Files') || t.includes('application/x-fanbox-paths') || t.includes('application/x-fanbox-path') || t.includes('text/plain')) {
         e.preventDefault(); e.stopPropagation(); host.classList.add('chat-drop');
       }
     });
@@ -6501,20 +6740,28 @@ const chat = {
     host.addEventListener('drop', async (e) => {
       e.preventDefault(); e.stopPropagation();
       host.classList.remove('chat-drop');
+      const droppedPaths = internalDragPaths(e.dataTransfer);
+      if (droppedPaths.length) {
+        droppedPaths.forEach((p) => this.addAttachment(p));
+        return;
+      }
       const files = e.dataTransfer.files ? [...e.dataTransfer.files] : [];
-      if (files.length && window.fanboxDrop) {
-        for (const f of files) {
-          let p = window.fanboxDrop.pathForFile(f);
-          if (!p) {
-            const r = await window.fanboxDrop.saveTemp(f.name, await f.arrayBuffer()).catch(() => null);
-            if (r && r.ok) p = r.path;
-          }
-          if (p) this.addAttachment(p);
+      if (files.length) {
+        if (!window.fanboxDrop) {
+          toast('网页版拿不到系统文件路径，请在桌面版里拖入，或先从左侧文件区拖入', true);
+          return;
         }
+        let ok = 0;
+        for (const f of files) {
+          const p = window.fanboxDrop.pathForFile(f);
+          if (p) { this.addAttachment(p); ok++; }
+        }
+        if (!ok) toast('没有拿到真实文件路径；请从文件区拖入，或先在灵匣中打开所在目录', true);
         return;
       }
       const p = e.dataTransfer.getData('application/x-fanbox-path') || e.dataTransfer.getData('text/plain');
-      if (p) this.addAttachment(p);
+      if (p && looksLikePath(p)) this.addAttachment(p);
+      else if (p) toast('拖入的内容不是可读取的文件路径', true);
     });
     this.refreshModelLabel();
   },
@@ -6545,10 +6792,18 @@ const aiSettings = {
     $('#ai-key').placeholder = p.hasKey ? '已配置（留空保持不变，粘贴新 key 可替换）' : '粘贴该服务商的 API key';
     $('#ai-baseurl').value = p.baseUrl || '';
     $('#ai-model').value = p.model || '';
+    this.renderApprovalMode();
     $('#ai-status').textContent = p.note || '';
     // 预设的建议模型先展示出来；有 key 的服务商自动拉一次实时列表（带缓存，不重复打 API）
     this.renderModelPick(this.modelsCache[this.sel] || p.models || []);
     if (p.hasKey && !this.modelsCache[this.sel]) this.fetchModels(true);
+  },
+  renderApprovalMode() {
+    const mode = this.data.approvalMode || 'smart';
+    document.querySelectorAll('#ai-approval-mode button').forEach((b) => {
+      b.classList.toggle('on', b.dataset.mode === mode);
+      b.setAttribute('aria-pressed', b.dataset.mode === mode ? 'true' : 'false');
+    });
   },
   // 模型候选渲染成可点的胶囊列表——datalist 会按输入框现有文字过滤，拉到了也看不见，不用它
   renderModelPick(models) {
@@ -6579,7 +6834,8 @@ const aiSettings = {
     } catch (e) { if (!silent) $('#ai-status').textContent = '拉取失败: ' + e.message; }
   },
   async save() {
-    const body = { provider: this.sel, model: $('#ai-model').value.trim(), baseUrl: $('#ai-baseurl').value.trim(), activate: true };
+    const modeBtn = document.querySelector('#ai-approval-mode button.on');
+    const body = { provider: this.sel, model: $('#ai-model').value.trim(), baseUrl: $('#ai-baseurl').value.trim(), approvalMode: modeBtn ? modeBtn.dataset.mode : 'smart', activate: true };
     const key = $('#ai-key').value.trim();
     if (key) body.apiKey = key;
     try {
@@ -6593,6 +6849,12 @@ const aiSettings = {
     $('#ai-close').onclick = () => this.close();
     $('#ai-save').onclick = () => this.save();
     $('#ai-fetch-models').onclick = () => this.fetchModels();
+    $('#ai-approval-mode').onclick = (e) => {
+      const btn = e.target.closest('button[data-mode]');
+      if (!btn || !this.data) return;
+      this.data.approvalMode = btn.dataset.mode;
+      this.renderApprovalMode();
+    };
     $('#ai-settings').onclick = (e) => { if (e.target.id === 'ai-settings') this.close(); };
     $('#ai-settings').addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { e.preventDefault(); this.close(); }

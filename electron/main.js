@@ -9,12 +9,33 @@ const { app, BrowserWindow, ipcMain, shell, nativeImage, Menu, clipboard, dialog
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const tcp = require('net');
 const { cmpVer, parseUpdateFeed, updateNoticeForFeed } = require('./update-feed.js');
 
-// 复用现有后端：require 即 listen 127.0.0.1:PORT，不自动开浏览器
+// 复用现有后端：Electron 启动时先挑一个可用端口，再 require server.js 监听。
 process.env.FANBOX_NO_OPEN = '1';
-const PORT = Number(process.env.FANBOX_PORT) || 4567;
-require('../server.js');
+let PORT = Number(process.env.FANBOX_PORT) || 4567;
+
+function canListen(port) {
+  return new Promise((resolve) => {
+    const probe = tcp.createServer()
+      .once('error', () => resolve(false))
+      .once('listening', () => probe.close(() => resolve(true)))
+      .listen(port, '127.0.0.1');
+  });
+}
+
+async function pickBackendPort(preferred) {
+  for (let port = preferred; port < preferred + 20; port++) {
+    if (await canListen(port)) return port;
+  }
+  throw new Error(`没有可用端口：${preferred}-${preferred + 19}`);
+}
+
+function startBackend() {
+  process.env.FANBOX_PORT = String(PORT);
+  require('../server.js');
+}
 
 // node-pty 是原生模块，需 electron-rebuild 编译过；未就绪时终端能力降级但 app 仍可用
 let pty = null;
@@ -76,6 +97,7 @@ function createWindow(initialPath) {
   });
 
   currentWin.on('closed', () => { if (win === currentWin) win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) || null; });
+  win = currentWin;
   return currentWin;
 }
 
@@ -86,7 +108,9 @@ function closeCurrentWindow(sender) {
   return { ok: true };
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  PORT = await pickBackendPort(PORT);
+  startBackend();
   // 开发模式下 macOS 默认显示 Electron 图标——换成翻箱自己的（打包后由 electron-builder 的 icon 接管）
   if (process.platform === 'darwin' && app.dock) {
     try { app.dock.setIcon(nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icon.png'))); } catch { /* */ }
@@ -394,7 +418,6 @@ function copyFilesToClipboard(paths, op = 'copy') {
     // argv 传路径，避免拼进 AppleScript 字面量被注入
     execFile('osascript', ['-e', 'on run argv', '-e', 'set xs to {}', '-e', 'repeat with p in argv', '-e', 'set end of xs to POSIX file p', '-e', 'end repeat', '-e', 'set the clipboard to xs', '-e', 'end run', ...list], (err) => resolve({ ok: !err, error: err && err.message }));
   });
-  win = currentWin;
 }
 
 // ---------- 剪贴板：复制图片本体 / 复制文件（系统文件管理器可粘贴）----------

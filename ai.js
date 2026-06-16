@@ -23,9 +23,16 @@ const os = require('os');
 const crypto = require('crypto');
 // SDK 是 ESM-only；Electron 33 内置 Node 20 不支持 require(esm)，必须动态 import（懒加载）
 let _query = null;
+let _startup = null;
+async function getSdk() {
+  if (!_query || !_startup) ({ query: _query, startup: _startup } = await import('@anthropic-ai/claude-agent-sdk'));
+  return { query: _query, startup: _startup };
+}
 async function getQuery() {
-  if (!_query) ({ query: _query } = await import('@anthropic-ai/claude-agent-sdk'));
-  return _query;
+  return (await getSdk()).query;
+}
+async function getStartup() {
+  return (await getSdk()).startup;
 }
 
 // 引擎二进制(claude/claude.exe)的真实磁盘路径。
@@ -75,6 +82,7 @@ const PROVIDERS = {
 const AUTO_ALLOW = new Set(['Read', 'Glob', 'Grep', 'TodoWrite', 'Task', 'WebFetch', 'WebSearch', 'NotebookRead', 'ToolSearch', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
   // Word 审阅只读工具（读正文/读已有批注修订）
   'mcp__docx__read', 'mcp__docx__review_status']);
+const APPROVAL_MODES = new Set(['ask', 'smart', 'auto']);
 
 // ---------- Word 审阅工具（@eigenpal/docx-editor-agents）----------
 // AI 像人类审阅者一样工作：批注 + 修订（tracked changes），不直接篡改正文。
@@ -167,11 +175,13 @@ module.exports = function createAI(ctx) {
   const CHATS_FILE = path.join(ctx.HOME, '.fanbox', 'chats.json');
   const pendingApprovals = new Map(); // approvalId -> resolve(bool)
   const running = new Map();          // chatId -> AbortController
+  const warmAgents = new Map();       // warmKey -> { promise, handle, runtimeRef }
   // 本机中转：引擎只连 127.0.0.1，由 Node 转发到模型端点。
   // 员工机器上杀软/EDR/代理常会掐未签名子进程的外联（引擎 ConnectionRefused 的根因），
   // 而本进程的 Node fetch 已被验证可达（模型列表就是它拉的）——让引擎借道这条通路
   let relayUpstream = '';
   async function relayHandle(req, res, p, search) {
+    const start = Date.now();
     if (!relayUpstream) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: { message: 'relay 未就绪：先发起一次对话' } }));
@@ -188,6 +198,8 @@ module.exports = function createAI(ctx) {
     let r;
     try {
       r = await fetch(target, { method: req.method, headers, body: chunks.length ? Buffer.concat(chunks) : undefined });
+      const dur = Date.now() - start;
+      if (p.includes('/messages') || dur > 1000) engineLog(`relay ${req.method} ${p.slice('/api/ai/relay'.length) || '/'} -> ${r.status} ${dur}ms`);
     } catch (e) {
       engineLog(`relay 上游失败: ${(e.message || '')}${e.cause ? ' / ' + e.cause.message : ''}`);
       res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -224,6 +236,7 @@ module.exports = function createAI(ctx) {
   async function getAIConfig() {
     const cfg = await ctx.readConfig();
     const ai = cfg.ai || { active: 'deepseek', providers: {} };
+    if (!APPROVAL_MODES.has(ai.approvalMode)) ai.approvalMode = 'smart';
     for (const p of Object.values(ai.providers || {})) {
       if (p.baseUrl && LEGACY_BASEURLS.has(p.baseUrl.replace(/\/+$/, ''))) delete p.baseUrl;
     }
@@ -232,7 +245,8 @@ module.exports = function createAI(ctx) {
   async function saveAIConfig(patch) {
     await ctx.updateConfig((cfg) => {
       cfg.ai = cfg.ai || { active: 'deepseek', providers: {} };
-      const { provider, apiKey, model, baseUrl, activate } = patch;
+      const { provider, apiKey, model, baseUrl, activate, approvalMode } = patch;
+      if (APPROVAL_MODES.has(approvalMode)) cfg.ai.approvalMode = approvalMode;
       if (provider && PROVIDERS[provider]) {
         const p = cfg.ai.providers[provider] || {};
         if (apiKey !== undefined && apiKey !== '') p.apiKey = apiKey;
@@ -255,6 +269,269 @@ module.exports = function createAI(ctx) {
     if (key === 'custom' && !baseUrl) throw new Error('自定义中转需要填 Base URL — 点右上角 ⚙ 设置');
     if (!model) throw new Error('还没选择模型 — 点右上角 ⚙ 设置');
     return { key, label: preset.label, baseUrl, model, apiKey: user.apiKey || '' };
+  }
+
+  function shouldEnableDocxTools(text, attachments) {
+    if ((attachments || []).some((a) => /\.docx$/i.test(String(a || '')))) return true;
+    return /(?:\.docx\b|Word|文档审阅|审阅|批注|修订|合同审阅|规范检查)/i.test(String(text || ''));
+  }
+
+  function shouldUseDirectChat(prov, chat, text, attachments) {
+    const s = String(text || '').trim();
+    if (prov.key === 'claude' || !prov.baseUrl || !prov.apiKey) return false;
+    if ((attachments || []).length || shouldEnableDocxTools(s, attachments)) return false;
+    if (chat.sessionId) return false;
+    if (!s || s.length > 240 || /```/.test(s)) return false;
+    return !/(文件|文件夹|目录|路径|当前|这里|这个|附件|读取|搜索|查找|打开|修改|改名|重命名|删除|复制|移动|粘贴|整理|运行|执行|命令|终端|代码库|项目|生成文件|保存|写入|表格|Excel|Word|docx|xlsx)/i.test(s);
+  }
+
+  function approvalDecision(mode, toolName, input) {
+    if (mode === 'auto') return { behavior: 'allow', updatedInput: input };
+    if (mode === 'smart' && AUTO_ALLOW.has(toolName)) return { behavior: 'allow', updatedInput: input };
+    return null;
+  }
+
+  function directHistoryForApi(chat) {
+    return (chat.messages || [])
+      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text)
+      .slice(-12)
+      .map((m) => ({ role: m.role, content: m.text }));
+  }
+
+  function priorChatContextForAgent(chat) {
+    const msgs = (chat.messages || [])
+      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text)
+      .slice(-12);
+    if (!msgs.length) return '';
+    let budget = 18000;
+    const lines = [];
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+      const m = msgs[i];
+      const label = m.role === 'assistant' ? '助手' : '用户';
+      let text = String(m.text || '').trim();
+      if (!text) continue;
+      const max = Math.min(budget, m.role === 'assistant' ? 8000 : 3000);
+      if (text.length > max) text = text.slice(0, max) + '\n...（该条前文过长，已截断）';
+      const line = `${label}：${text}`;
+      lines.unshift(line);
+      budget -= line.length;
+      if (budget <= 0) break;
+    }
+    if (!lines.length) return '';
+    return [
+      '以下是本对话前文。请严格承接这些内容，不要再次询问用户“要生成什么文档/什么内容”。',
+      '如果用户说“上面/刚才/这个/生成文档/整理成 Word”等指代，默认指向最近一轮助手已经产出的内容。',
+      '',
+      lines.join('\n\n'),
+    ].join('\n');
+  }
+
+  async function runDirectChat({ prov, chat, text, send, signal, startedAt }) {
+    const started = Date.now();
+    const messages = [...directHistoryForApi(chat), { role: 'user', content: text }];
+    const r = await fetch(`${prov.baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': prov.apiKey,
+        authorization: `Bearer ${prov.apiKey}`,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: prov.model,
+        max_tokens: 1024,
+        stream: true,
+        system: '你在「灵匣 Arca」的对话面板里工作。直接、简洁、自然地用中文回答；普通寒暄不要自称 Claude Code，也不要展开工具能力介绍。',
+        messages,
+      }),
+      signal,
+    });
+    engineLog(`chat=${chat.id} direct_headers=${Date.now() - startedAt}ms status=${r.status}`);
+    if (!r.ok) throw new Error(`Direct API ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const dec = new TextDecoder();
+    let buf = '';
+    let answer = '';
+    let firstTextLogged = false;
+    for await (const chunk of r.body) {
+      buf += dec.decode(chunk, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (!raw || raw === '[DONE]') continue;
+        let ev; try { ev = JSON.parse(raw); } catch { continue; }
+        if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
+          if (!firstTextLogged) {
+            firstTextLogged = true;
+            engineLog(`chat=${chat.id} direct_first_text=${Date.now() - startedAt}ms`);
+          }
+          answer += ev.delta.text || '';
+          send({ type: 'text', delta: ev.delta.text || '' });
+        }
+      }
+    }
+    await updateChats((list) => {
+      const c = list.find((x) => x.id === chat.id);
+      if (c) {
+        c.direct = true;
+        c.messages = [...(c.messages || []), { role: 'user', text }, { role: 'assistant', text: answer }].slice(-40);
+        c.ts = Date.now();
+      }
+      return list;
+    });
+    engineLog(`chat=${chat.id} direct_done=${Date.now() - startedAt}ms upstream=${Date.now() - started}ms`);
+    send({ type: 'done', turns: 1 });
+  }
+
+  function buildProviderEnv(prov) {
+    const env = { ...process.env };
+    // 引擎的更新检查/遥测/错误上报等非必要外联一律关掉——员工机器只跟所选模型 API 通信
+    env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
+    env.DISABLE_TELEMETRY = '1';
+    env.DISABLE_ERROR_REPORTING = '1';
+    if (prov.key !== 'claude') {
+      // 第三方端点统一走 Bearer 认证（DeepSeek 等官方指引就是 ANTHROPIC_AUTH_TOKEN）。
+      // 注意要 delete 而不是置空串——空串环境变量照样占住认证优先级
+      // 引擎不直连外网：指到本机中转（127.0.0.1 谁都拦不了），由 Node 转发到真端点。
+      // 员工机器的杀软/EDR/残留代理会掐未签名子进程的外联（v1.0.4 真机 ConnectionRefused 根因）
+      relayUpstream = prov.baseUrl;
+      env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${ctx.PORT}/api/ai/relay`;
+      env.ANTHROPIC_AUTH_TOKEN = prov.apiKey;
+      delete env.ANTHROPIC_API_KEY;
+      env.ANTHROPIC_MODEL = prov.model;
+      env.ANTHROPIC_SMALL_FAST_MODEL = prov.model;
+      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = prov.model;
+      // 本机回环不走任何代理
+      for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[k];
+      env.NO_PROXY = '*';
+    } else if (prov.apiKey) {
+      env.ANTHROPIC_API_KEY = prov.apiKey;
+      delete env.ANTHROPIC_AUTH_TOKEN;
+    }
+    return env;
+  }
+
+  function warmAgentKey({ prov, chat, enableDocx }) {
+    return [prov.key, prov.model, prov.baseUrl || '', chat.cwd, enableDocx ? 'docx' : 'plain'].join('|');
+  }
+
+  function makeCanUseTool(runtimeRef, fallbackApprovalMode) {
+    return async (toolName, input, { signal } = {}) => {
+      const runtime = runtimeRef.current || {};
+      const approvalMode = runtime.approvalMode || fallbackApprovalMode || 'smart';
+      const decision = approvalDecision(approvalMode, toolName, input);
+      if (decision) return decision;
+      const send = runtime.send;
+      if (!send) return { behavior: 'deny', message: '工具审批界面未就绪，请用户重试' };
+      const id = crypto.randomBytes(8).toString('hex');
+      send({ type: 'approval', id, name: toolName, args: input });
+      const ok = await new Promise((resolve) => {
+        const timer = setTimeout(() => { pendingApprovals.delete(id); resolve(false); }, 5 * 60 * 1000);
+        const done = (v) => { clearTimeout(timer); pendingApprovals.delete(id); resolve(v); };
+        pendingApprovals.set(id, done);
+        if (signal) signal.addEventListener('abort', () => done(false), { once: true });
+      });
+      send({ type: 'approval_done', id, name: toolName, ok });
+      return ok ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: '用户拒绝了这次操作，请换个方式或询问用户' };
+    };
+  }
+
+  async function buildAgentOptions({ prov, chat, approvalMode, enableDocx, env, ac, runtimeRef }) {
+    const enginePath = engineBinaryPath();
+    const mcpServers = enableDocx ? { docx: await buildDocxServer(chat.cwd) } : undefined;
+    return {
+      cwd: chat.cwd,
+      model: prov.model,
+      resume: chat.sessionId || undefined,
+      permissionMode: 'default',
+      // Arca is an embedded app with its own provider switcher. Do not let
+      // the user's global Claude Code settings override ANTHROPIC_* env
+      // (for example a stale ~/.claude/settings.json baseUrl).
+      settingSources: [],
+      includePartialMessages: true,
+      maxTurns: 100,
+      abortController: ac,
+      env,
+      pathToClaudeCodeExecutable: enginePath || undefined,
+      stderr: (data) => { const s = String(data).trim(); if (s) engineLog(`stderr: ${s.slice(0, 500)}`); },
+      ...(mcpServers ? { mcpServers } : {}),
+      systemPrompt: {
+        type: 'preset', preset: 'claude_code',
+        append: [
+          '你在「灵匣 Arca」的对话面板里工作，用户可能不熟悉技术——回答说人话、保持简洁、始终用中文。',
+          '产出尽量落成文件（写到当前工作目录），并在回答里给出文件路径。',
+          '删除、覆盖、批量改动前先用一两句话说明影响。',
+          enableDocx ? '审阅/检查/修改 Word 文档(.docx)时用 docx 系列工具（read 读段落编号→review 一次性提交批注+修订），像人类审阅者一样打标记，不要直接改写文件正文。' : '',
+        ].join('\n'),
+      },
+      canUseTool: makeCanUseTool(runtimeRef, approvalMode),
+    };
+  }
+
+  function pruneWarmAgent(warmKey, entry, reason) {
+    if (warmAgents.get(warmKey) !== entry) return;
+    warmAgents.delete(warmKey);
+    try { if (entry.handle) entry.handle.close(); } catch { /* */ }
+    try { entry.abortController.abort(); } catch { /* */ }
+    engineLog(`chat=${entry.chatId} warm_agent=${reason} age=${Date.now() - entry.createdAt}ms`);
+  }
+
+  async function prepareWarmAgent({ prov, chat, approvalMode, enableDocx }) {
+    if (enableDocx) return;
+    const warmKey = warmAgentKey({ prov, chat, enableDocx });
+    if (warmAgents.has(warmKey)) return;
+    const runtimeRef = { current: null };
+    const ac = new AbortController();
+    const entry = {
+      chatId: chat.id,
+      createdAt: Date.now(),
+      runtimeRef,
+      abortController: ac,
+      handle: null,
+      promise: null,
+    };
+    warmAgents.set(warmKey, entry);
+    entry.promise = (async () => {
+      const startup = await getStartup();
+      const env = buildProviderEnv(prov);
+      const options = await buildAgentOptions({ prov, chat, approvalMode, enableDocx, env, ac, runtimeRef });
+      engineLog(`chat=${chat.id} warm_agent=start docx=off`);
+      entry.handle = await startup({ options, initializeTimeoutMs: 60000 });
+      engineLog(`chat=${chat.id} warm_agent=ready ${Date.now() - entry.createdAt}ms`);
+      return entry.handle;
+    })().catch((e) => {
+      if (warmAgents.get(warmKey) === entry) warmAgents.delete(warmKey);
+      engineLog(`chat=${chat.id} warm_agent=failed ${String(e.message || e).slice(0, 300)}`);
+      throw e;
+    });
+    const timer = setTimeout(() => pruneWarmAgent(warmKey, entry, 'expired'), 2 * 60 * 1000);
+    if (timer.unref) timer.unref();
+  }
+
+  async function takeWarmAgent(warmKey) {
+    const entry = warmAgents.get(warmKey);
+    if (!entry) return null;
+    warmAgents.delete(warmKey);
+    let timeout = null;
+    try {
+      const handle = await Promise.race([
+        entry.promise,
+        new Promise((resolve) => { timeout = setTimeout(() => resolve(null), 13000); }),
+      ]);
+      if (timeout) clearTimeout(timeout);
+      if (!handle) {
+        try { entry.abortController.abort(); } catch { /* */ }
+        engineLog(`chat=${entry.chatId} warm_agent=miss_wait_timeout age=${Date.now() - entry.createdAt}ms`);
+        return null;
+      }
+      return entry;
+    } catch (e) {
+      if (timeout) clearTimeout(timeout);
+      engineLog(`chat=${entry.chatId} warm_agent=miss_failed ${String(e.message || e).slice(0, 300)}`);
+      return null;
+    }
   }
 
   // ---------- 引擎 transcript 回显（读 ~/.claude/projects/<cwd-slug>/<sessionId>.jsonl）----------
@@ -317,7 +594,7 @@ module.exports = function createAI(ctx) {
         const u = (ai.providers && ai.providers[k]) || {};
         out[k] = { label: v.label, baseUrl: u.baseUrl || v.baseUrl, models: v.models, keyUrl: v.keyUrl, note: v.note || '', hasKey: !!u.apiKey, model: u.model || v.models[0] || '' };
       }
-      sendJSON(res, 200, { active: ai.active || 'deepseek', providers: out });
+      sendJSON(res, 200, { active: ai.active || 'deepseek', approvalMode: ai.approvalMode || 'smart', providers: out });
       return true;
     }
     if (p === '/api/ai/config' && req.method === 'POST') {
@@ -374,7 +651,9 @@ module.exports = function createAI(ctx) {
     if (p === '/api/ai/chat-history' && req.method === 'GET') {
       const id = url.searchParams.get('id');
       const chat = (await readChats()).find((c) => c.id === id);
-      if (!chat || !chat.sessionId) { sendJSON(res, 200, { messages: [] }); return true; }
+      if (!chat) { sendJSON(res, 200, { messages: [] }); return true; }
+      if (Array.isArray(chat.messages) && chat.messages.length) { sendJSON(res, 200, { messages: chat.messages, chat }); return true; }
+      if (!chat.sessionId) { sendJSON(res, 200, { messages: [] }); return true; }
       sendJSON(res, 200, { messages: await readTranscript(chat.cwd, chat.sessionId), chat });
       return true;
     }
@@ -407,12 +686,18 @@ module.exports = function createAI(ctx) {
 
   // ---------- 对话主流程：一次用户消息 = 一次引擎 query ----------
   async function handleChat(req, res) {
+    const t0 = Date.now();
     const { chatId, text, title, attachments, cwd } = await readBody(req);
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* 客户端断开 */ } };
     let runKey = chatId;
+    let firstMsgLogged = false;
+    let firstTextLogged = false;
+    let warmInUse = null;
     try {
       const prov = await activeProvider();
+      const aiCfg = await getAIConfig();
+      const approvalMode = aiCfg.approvalMode || 'smart';
       // 找到/新建会话记录。resume 要求 cwd 一致，所以会话固定在创建时的目录
       const chats = await readChats();
       let chat = chats.find((c) => c.id === chatId);
@@ -423,85 +708,49 @@ module.exports = function createAI(ctx) {
       send({ type: 'chat', id: chat.id, title: chat.title });
       send({ type: 'meta', provider: prov.label, model: prov.model });
 
-      // 第三方模型：环境变量指到它的 Anthropic 兼容端点；小模型任务也指过去（别打到官方 haiku）
-      const env = { ...process.env };
-      // 引擎的更新检查/遥测/错误上报等非必要外联一律关掉——员工机器只跟所选模型 API 通信
-      env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
-      env.DISABLE_TELEMETRY = '1';
-      env.DISABLE_ERROR_REPORTING = '1';
-      if (prov.key !== 'claude') {
-        // 第三方端点统一走 Bearer 认证（DeepSeek 等官方指引就是 ANTHROPIC_AUTH_TOKEN）。
-        // 注意要 delete 而不是置空串——空串环境变量照样占住认证优先级
-        // 引擎不直连外网：指到本机中转（127.0.0.1 谁都拦不了），由 Node 转发到真端点。
-        // 员工机器的杀软/EDR/残留代理会掐未签名子进程的外联（v1.0.4 真机 ConnectionRefused 根因）
-        relayUpstream = prov.baseUrl;
-        env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${ctx.PORT}/api/ai/relay`;
-        env.ANTHROPIC_AUTH_TOKEN = prov.apiKey;
-        delete env.ANTHROPIC_API_KEY;
-        env.ANTHROPIC_MODEL = prov.model;
-        env.ANTHROPIC_SMALL_FAST_MODEL = prov.model;
-        env.ANTHROPIC_DEFAULT_HAIKU_MODEL = prov.model;
-        // 本机回环不走任何代理
-        for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[k];
-        env.NO_PROXY = '*';
-      } else if (prov.apiKey) {
-        env.ANTHROPIC_API_KEY = prov.apiKey;
-        delete env.ANTHROPIC_AUTH_TOKEN;
-      }
+      const env = buildProviderEnv(prov);
 
-      const prompt = [text, ...(attachments || []).map((a) => `（附件，请按需读取：${a}）`)].filter(Boolean).join('\n');
-      const query = await getQuery();
-      const enginePath = engineBinaryPath();
-      engineLog(`chat=${chat.id} provider=${prov.key} model=${prov.model} base=${prov.baseUrl || '(官方)'} engine=${enginePath || '(SDK自行解析)'}`);
+      const prompt = [
+        priorChatContextForAgent(chat),
+        text,
+        ...(attachments || []).map((a) => `（附件，请按需读取：${a}）`),
+      ].filter(Boolean).join('\n\n');
       const ac = new AbortController();
       runKey = chat.id;
       running.set(runKey, ac);
       req.on('close', () => { try { ac.abort(); } catch { /* */ } });
+      if (shouldUseDirectChat(prov, chat, text, attachments)) {
+        engineLog(`chat=${chat.id} direct=on prep=${Date.now() - t0}ms`);
+        prepareWarmAgent({ prov, chat, approvalMode, enableDocx: false }).catch(() => {});
+        await runDirectChat({ prov, chat, text, send, signal: ac.signal, startedAt: t0 });
+        res.end();
+        return;
+      }
 
-      const q = query({
-        prompt,
-        options: {
-          cwd: chat.cwd,
-          model: prov.model,
-          resume: chat.sessionId || undefined,
-          permissionMode: 'default',
-          // Arca is an embedded app with its own provider switcher. Do not let
-          // the user's global Claude Code settings override ANTHROPIC_* env
-          // (for example a stale ~/.claude/settings.json baseUrl).
-          settingSources: [],
-          includePartialMessages: true,
-          maxTurns: 100,
-          abortController: ac,
-          env,
-          pathToClaudeCodeExecutable: enginePath || undefined,
-          stderr: (data) => { const s = String(data).trim(); if (s) engineLog(`stderr: ${s.slice(0, 500)}`); },
-          mcpServers: { docx: await buildDocxServer(chat.cwd) },
-          systemPrompt: {
-            type: 'preset', preset: 'claude_code',
-            append: [
-              '你在「灵匣 Arca」的对话面板里工作，用户可能不熟悉技术——回答说人话、保持简洁、始终用中文。',
-              '产出尽量落成文件（写到当前工作目录），并在回答里给出文件路径。',
-              '删除、覆盖、批量改动前先用一两句话说明影响。',
-              '审阅/检查/修改 Word 文档(.docx)时用 docx 系列工具（read 读段落编号→review 一次性提交批注+修订），像人类审阅者一样打标记，不要直接改写文件正文。',
-            ].join('\n'),
-          },
-          canUseTool: async (toolName, input, { signal }) => {
-            if (AUTO_ALLOW.has(toolName)) return { behavior: 'allow', updatedInput: input };
-            const id = crypto.randomBytes(8).toString('hex');
-            send({ type: 'approval', id, name: toolName, args: input });
-            const ok = await new Promise((resolve) => {
-              const timer = setTimeout(() => { pendingApprovals.delete(id); resolve(false); }, 5 * 60 * 1000);
-              const done = (v) => { clearTimeout(timer); pendingApprovals.delete(id); resolve(v); };
-              pendingApprovals.set(id, done);
-              if (signal) signal.addEventListener('abort', () => done(false), { once: true });
-            });
-            send({ type: 'approval_done', id, name: toolName, ok });
-            return ok ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: '用户拒绝了这次操作，请换个方式或询问用户' };
-          },
-        },
-      });
+      const enableDocx = shouldEnableDocxTools(text, attachments);
+      const enginePath = engineBinaryPath();
+      const warmKey = warmAgentKey({ prov, chat, enableDocx });
+      const warm = await takeWarmAgent(warmKey);
+      const runtimeRef = warm ? warm.runtimeRef : { current: null };
+      runtimeRef.current = { send, approvalMode };
+      const options = warm ? null : await buildAgentOptions({ prov, chat, approvalMode, enableDocx, env, ac, runtimeRef });
+      engineLog(`chat=${chat.id} provider=${prov.key} model=${prov.model} base=${prov.baseUrl || '(官方)'} approval=${approvalMode} docx=${enableDocx ? 'on' : 'off'} prep=${Date.now() - t0}ms engine=${enginePath || '(SDK自行解析)'}`);
+      let q;
+      if (warm) {
+        warmInUse = warm;
+        req.on('close', () => { try { warm.handle.close(); } catch { /* */ } });
+        engineLog(`chat=${chat.id} warm_agent=used age=${Date.now() - warm.createdAt}ms`);
+        q = warm.handle.query(prompt);
+      } else {
+        const query = await getQuery();
+        q = query({ prompt, options });
+      }
 
       for await (const msg of q) {
+        if (!firstMsgLogged) {
+          firstMsgLogged = true;
+          engineLog(`chat=${chat.id} first_msg=${Date.now() - t0}ms type=${msg.type}${msg.subtype ? '/' + msg.subtype : ''}`);
+        }
         if (msg.type === 'system' && msg.subtype === 'init') {
           if (msg.session_id && msg.session_id !== chat.sessionId) {
             chat.sessionId = msg.session_id;
@@ -512,7 +761,13 @@ module.exports = function createAI(ctx) {
           if (msg.parent_tool_use_id) continue;
           const ev = msg.event;
           if (ev.type === 'content_block_delta') {
-            if (ev.delta.type === 'text_delta') send({ type: 'text', delta: ev.delta.text });
+            if (ev.delta.type === 'text_delta') {
+              if (!firstTextLogged) {
+                firstTextLogged = true;
+                engineLog(`chat=${chat.id} first_text=${Date.now() - t0}ms`);
+              }
+              send({ type: 'text', delta: ev.delta.text });
+            }
             else if (ev.delta.type === 'thinking_delta' && ev.delta.thinking) send({ type: 'think', delta: ev.delta.thinking });
           }
         } else if (msg.type === 'assistant') {
@@ -529,7 +784,11 @@ module.exports = function createAI(ctx) {
             engineLog(`chat=${chat.id} 引擎报错: ${String(msg.result || msg.subtype).slice(0, 300)}`);
             send({ type: 'error', message: String(msg.result || msg.subtype).slice(0, 500) });
           }
-          send({ type: 'done', cost: msg.total_cost_usd, turns: msg.num_turns });
+          engineLog(`chat=${chat.id} done=${Date.now() - t0}ms turns=${msg.num_turns || 0}${msg.is_error ? ' error' : ''}`);
+          const done = { type: 'done', turns: msg.num_turns };
+          if (prov.key === 'claude' && msg.total_cost_usd > 0) done.cost = msg.total_cost_usd;
+          send(done);
+          prepareWarmAgent({ prov, chat, approvalMode, enableDocx: false }).catch(() => {});
         }
       }
     } catch (e) {
@@ -538,6 +797,7 @@ module.exports = function createAI(ctx) {
       send({ type: 'error', message: aborted ? '已停止' : e.message });
       send({ type: 'done' });
     } finally {
+      if (warmInUse) { try { warmInUse.handle.close(); } catch { /* */ } }
       running.delete(runKey);
     }
     res.end();

@@ -11,11 +11,99 @@
 
 ## [Unreleased]
 
+## [1.0.30] - 2026-06-16
+
+### Fixed
+- AI 工具/审批里的相对 `file_path` 会按当前目录解析成真实本地路径，路径胶囊、审批前打开、工具完成后的文件区同步都不再依赖 Agent 必须吐绝对路径。
+- “本会话变更”的文件标记改为角标和淡底色，不再使用橙色整框发光，避免一个文件被选中、另一个文件刚被 AI 修改时看起来像同时选中了两个文件。
+- Windows 本地 `npm run dist:win` 不再默认执行 `electron-rebuild`，遵循 `build.npmRebuild=false` 直接打包；需要重编原生依赖时仍可手动跑 `npm run rebuild`，CI 保持显式 rebuild。
+
+### Verified
+- `node --check public/app.js` 通过。
+- 新增 `check-changed-marker-visual-contract.js`、`check-windows-dist-script-contract.js`，并通过 `check-chat-path-actions-contract.js`、`check-chat-approval-path-actions-contract.js`。
+- `npm run dist:win` 已在 Windows 真机跑通并产出 `Arca-Setup-1.0.30.exe`。
+- 全部 74 个 `scripts/check-*.js` 契约脚本通过。
+
+## [1.0.29] - 2026-06-16
+
+### Fixed
+- AI 审批卡片已有目标路径胶囊时，详情框不再重复显示 `file_path`；`Write` 显示内容预览，`Edit/MultiEdit` 显示替换预览，审批时更容易快速判断风险。
+
+### Verified
+- `node --check public/app.js` 与新增 `check-chat-approval-detail-contract.js` 通过。
+- 全部 72 个 `scripts/check-*.js` 契约脚本通过。
+
+## [1.0.28] - 2026-06-16
+
+### Added
+- AI 审批卡片会把 `Write/Edit/MultiEdit/NotebookEdit/Read` 的目标文件路径显示为可操作胶囊，批准前即可在灵匣中打开/预览或复制路径，减少误批错文件的风险。
+
+### Verified
+- `node --check public/app.js` 与新增 `check-chat-approval-path-actions-contract.js` 通过。
+- 全部 71 个 `scripts/check-*.js` 契约脚本通过。
+
+## [1.0.27] - 2026-06-16
+
+### Fixed
+- AI 工具完成后的文件区同步只对 `Write/Edit/MultiEdit/NotebookEdit` 这类写改工具生效；`Read` 仍保留可操作路径胶囊，但不会进入“本会话变更”或触发文件区刷新，避免把读过的文件误报成 AI 改过的文件。
+
+### Verified
+- `node --check public/app.js` 与 `check-chat-tool-file-sync-contract.js` 通过。
+- 全部 70 个 `scripts/check-*.js` 契约脚本通过。
+
+## [1.0.26] - 2026-06-16
+
+### Added
+- AI 工具执行完成后会主动同步文件区：对 `Write/Edit/MultiEdit/NotebookEdit` 这类写改工具涉及的文件登记到“本会话变更”，若文件位于当前目录则自动刷新、选中，并在预览窗格开启时跟随预览，让“AI 写完文件”更像原生文件操作。
+
+### Verified
+- `node --check public/app.js` 与新增 `check-chat-tool-file-sync-contract.js` 通过。
+- 全部 70 个 `scripts/check-*.js` 契约脚本通过。
+
+## [1.0.25] - 2026-06-16
+
+### Added
+- AI 工具执行状态行也会把 `Write` / `Edit` / `MultiEdit` / `Read` 的本地文件路径显示为可操作胶囊，可直接打开/预览或复制，避免最终回复没列路径时用户还要去目录里找。
+
+### Verified
+- `node --check public/app.js` 与 `check-chat-path-actions-contract.js` 通过。
+- 全部 69 个 `scripts/check-*.js` 契约脚本通过。
+
+## [1.0.24] - 2026-06-16
+
+### Added
+- AI 回复里的本地文件路径现在会自动变成可操作胶囊：点击文件名可在灵匣中定位并预览，点击「复制」可复制完整路径；支持 Windows 盘符路径、UNC 路径和 file URL，减少“AI 已生成文件但用户还要手工找”的断裂感。
+
+### Verified
+- `node --check public/app.js` 与新增 `check-chat-path-actions-contract.js` 通过。
+- 全部 69 个 `scripts/check-*.js` 契约脚本通过。
+- 本机缺少 Playwright/Browser 直连工具，本轮未声称浏览器点击 E2E；安装包完成后会抽检 asar 内容。
+
+## [1.0.23] - 2026-06-16
+
 ### Added
 - 快捷方式补齐目标行为：双击 `.lnk` 会打开真实目标，右键可「打开目标位置」，属性面板显示目标路径。
 - 快捷方式属性面板新增「复制目标路径」和「打开目标位置」，查看 `.lnk` 时不用退回右键菜单。
 - 面包屑路径段新增右键菜单，可直接打开上级目录、新标签/新窗口打开、复制路径、终端打开、收藏和查看属性。
 - 复制文件/文件夹后，空白处或目标文件夹右键可「粘贴快捷方式」，生成 `.lnk` 并接入撤销/重做。
+- AI 设置新增工具审批三档：需要批准、智能批准、全部放行；默认智能批准，低风险读/搜自动放行，写文件/执行命令继续询问。
+
+### Fixed
+- AI 同一会话上下文打通：前一轮短问答走快车道、后一轮切到完整 Agent 写文件/生成 Word 时，会把前文注入给 Agent，避免“把上面内容生成文档”被反问“生成什么文档”。
+- AI Agent 预热池：直聊或 Agent 回合结束后后台调用 SDK `startup()` 预启动下一次 Agent；用户下一次触发文件/目录任务时优先复用 warm query，降低 Claude Code 引擎初始化等待。
+- 对话面板左侧会话列表支持拖拽调整宽度，并记住上次宽度，长标题/路径多的场景不用被固定栏宽卡住。
+- 文件区“选中项”和“键盘当前项”视觉去歧义：单选会同步 cursor，非选中 cursor 不再显示第二个边框，避免看起来像同时选中两个文件。
+- 第三方模型不再展示 Claude SDK 的美元 cost 估算，避免 DeepSeek/Kimi 被错误价目误导；Claude 官方 provider 仍保留 cost 显示。
+- Office 预览切换为紧凑正文模式，压缩 Word/Excel 预览里的 Arca 保存栏和边距，让文档正文占据更多有效空间。
+- Excel 预览对空工作表/无 `!ref` 的特殊工作表按 sheet 单独降级，避免一个空 sheet 触发 SheetJS `indexOf` 异常后拖垮整个工作簿。
+- 文本预览从固定 UTF-8 解码改为 BOM/严格 UTF-8 优先、失败回退 GBK，修复老 Windows 工程说明 `.txt` 中文乱码。
+- 对话区拖入文件保持“路径附件”语义：内部多选路径可一次性加入，系统文件只读取真实路径，拿不到路径时提示，不再偷偷复制文件内容。
+- 普通寒暄/短问答走 DeepSeek Anthropic API 直连快车道，绕开 Claude Code Agent 每轮 15s+ 冷启动；涉及附件、文件/目录、执行、Word/Excel 等意图仍走完整 Agent。
+
+### Verified
+- `deepseek-v4-flash` 真实“你好”E2E：快车道 `direct=on`，首字约 2.3s，完整结束约 2.4s；原 Agent 路径实测首字约 18-23s，慢点来自 Agent 初始化而非 DeepSeek 上游。
+- `deepseek-v4-flash` 同机真实写文件 E2E：无预热 Agent `system/init` 10.34s、首字 13.04s、完成 13.18s；预热命中后 `system/init` 0.24s、首字 3.63s、完成 3.80s，文件实际落盘。
+- `node --check` 覆盖改动 JS；全部 68 个 `scripts/check-*.js` 契约脚本通过；Chrome headless 冒烟验证 AI 设置三档审批、模型标签和弹窗开合。
 
 ## [1.0.19] - 2026-06-14
 

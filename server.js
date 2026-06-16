@@ -15,6 +15,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { exec, spawn, execFile } = require('child_process');
 const { URL } = require('url');
+const { decodeTextPreviewBuffer } = require('./lib/text-preview-decoder');
 
 const HOME = os.homedir();
 const PORT = Number(process.env.FANBOX_PORT) || 4567;
@@ -335,9 +336,13 @@ async function readFile(filePath) {
       let end = bytesRead;
       while (end > 0 && (buf[end - 1] & 0xC0) === 0x80) end--;
       if (end > 0 && (buf[end - 1] & 0xC0) === 0xC0) end--;
-      info.content = buf.toString('utf8', 0, end) + '\n\n… (文件较大，仅显示前 256KB)';
+      const decoded = decodeTextPreviewBuffer(buf.subarray(0, end));
+      info.encoding = decoded.encoding;
+      info.content = decoded.text + '\n\n… (文件较大，仅显示前 256KB)';
     } else {
-      info.content = await fsp.readFile(file, 'utf8');
+      const decoded = decodeTextPreviewBuffer(await fsp.readFile(file));
+      info.encoding = decoded.encoding;
+      info.content = decoded.text;
     }
   }
   return info;

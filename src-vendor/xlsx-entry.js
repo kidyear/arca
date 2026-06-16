@@ -9,9 +9,33 @@ window.FanboxXlsx = {
   /** buf: ArrayBuffer → [{ name, html }] 每个工作表一段 <table> HTML */
   parse(buf) {
     const wb = XLSX.read(buf, { type: 'array' });
-    return wb.SheetNames.map((name) => ({
+    return (wb.SheetNames || []).map((name) => ({
       name,
-      html: XLSX.utils.sheet_to_html(wb.Sheets[name], { header: '', footer: '' }),
+      ...safeSheetToHtml(wb.Sheets[name]),
     }));
   },
 };
+
+function safeSheetToHtml(sheet) {
+  if (!sheet || !sheet['!ref']) {
+    return { html: '<div class="empty-state">空工作表</div>', isEmpty: true };
+  }
+  try {
+    return { html: XLSX.utils.sheet_to_html(sheet, { header: '', footer: '' }) };
+  } catch (err) {
+    return {
+      html: `<div class="empty-state">此工作表暂无法预览：${escapeHtml(err && err.message ? err.message : '解析失败')}</div>`,
+      error: err && err.message ? err.message : '解析失败',
+    };
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[c]));
+}

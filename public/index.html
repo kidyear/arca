@@ -163,6 +163,7 @@
               <button id="chat-new" title="开始新对话">＋ 新对话</button>
               <div id="chat-list"></div>
             </aside>
+            <div id="chat-side-resizer" role="separator" aria-label="调整对话列表宽度" title="拖动调整对话列表宽度"></div>
             <div id="chat-main">
               <div id="chat-msgs"><div class="chat-empty" id="chat-empty">
                 <p><b>跟 AI 说要做什么就行</b></p>
@@ -205,6 +206,13 @@
             <span class="ai-model-row">
               <input id="ai-model" placeholder="模型 ID，可手填" autocomplete="off">
               <button id="ai-fetch-models" class="ghost-btn" title="拉取该服务商当前可用的模型列表">拉取列表</button>
+            </span>
+          </label>
+          <label class="ai-row">工具审批
+            <span id="ai-approval-mode" class="ai-approval-mode" role="group" aria-label="工具审批模式">
+              <button type="button" data-mode="ask">需要批准</button>
+              <button type="button" data-mode="smart">智能批准</button>
+              <button type="button" data-mode="auto">全部放行</button>
             </span>
           </label>
           <div id="ai-model-pick" class="ai-model-pick hidden"></div>
