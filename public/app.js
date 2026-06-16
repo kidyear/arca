@@ -6235,6 +6235,15 @@ function approvalPathFromArgs(name, args = {}) {
 function templateSelectedAttachmentPaths() {
   return selEntries().filter((e) => e && !e.isDir && !e.isDrive).map((e) => e.path).filter(Boolean);
 }
+function templateSelectedAttachmentSummary() {
+  const paths = templateSelectedAttachmentPaths();
+  if (!paths.length) return null;
+  const hint = document.createElement('div');
+  hint.className = 'tpl-selected-files';
+  const names = paths.slice(0, 3).map((p) => baseOf(p)).join('、');
+  hint.textContent = `当前已选 ${paths.length} 个文件：${names}${paths.length > 3 ? ` 等 ${paths.length} 个` : ''}`;
+  return hint;
+}
 const tpl = {
   data: null,
   dept: localStorage.getItem('fb_tpl_dept') || '通用',
@@ -6291,6 +6300,8 @@ const tpl = {
       const fh = document.createElement('div');
       fh.className = 'tpl-files';
       fh.textContent = `📎 ${t.filesHint || '选中文件或拖进对话区作为附件'}${t.needsFiles ? '（必需）' : '（可选）'}`;
+      const selectedHint = templateSelectedAttachmentSummary();
+      if (selectedHint) fh.appendChild(selectedHint);
       form.appendChild(fh);
     }
     const inputs = {};

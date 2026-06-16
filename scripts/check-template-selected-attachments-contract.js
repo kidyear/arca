@@ -5,6 +5,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'public', 'style.css'), 'utf8');
 
 function assertIncludes(label, text, needle) {
   if (!text.includes(needle)) throw new Error(`${label} missing: ${needle}`);
@@ -18,5 +19,10 @@ assertIncludes('template run gives feedback', app, '已用当前选中的');
 assertIncludes('template still falls back to explicit attach error', app, "toast('这个模板需要先把文件拖进对话区作为附件', true);");
 assertIncludes('template picker copy mentions select or drag', app, '选卡片 → 选/拖文件 → 填一两句 → 开工');
 assertIncludes('template file hint mentions selected files', app, '选中文件或拖进对话区作为附件');
+assertIncludes('selected attachment summary helper', app, 'function templateSelectedAttachmentSummary()');
+assertIncludes('selected attachment summary shows count', app, '当前已选');
+assertIncludes('template runner renders selected attachment summary', app, 'const selectedHint = templateSelectedAttachmentSummary();');
+assertIncludes('template runner appends selected attachment summary', app, 'fh.appendChild(selectedHint);');
+assertIncludes('selected attachment summary has a quiet visual style', css, '.tpl-selected-files');
 
 console.log('template-selected-attachments contract ok');
