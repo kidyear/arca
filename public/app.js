@@ -6236,6 +6236,9 @@ function approvalPathFromArgs(name, args = {}) {
 function templateSelectedAttachmentPaths() {
   return selEntries().filter((e) => e && !e.isDir && !e.isDrive).map((e) => e.path).filter(Boolean);
 }
+function templateSelectedNonFileCount() {
+  return selEntries().filter((e) => e && (e.isDir || e.isDrive)).length;
+}
 function useSelectedFilesForTemplateAttachment() {
   chat.attachments = templateSelectedAttachmentPaths();
   chat.renderChips();
@@ -6244,6 +6247,13 @@ function templateAttachmentContextSummary() {
   const queued = chat && chat.attachments && chat.attachments.length ? chat.attachments : [];
   const selected = templateSelectedAttachmentPaths();
   const paths = queued.length ? queued : selected;
+  const nonFiles = templateSelectedNonFileCount();
+  if (!paths.length && nonFiles) {
+    const warn = document.createElement('div');
+    warn.className = 'tpl-selected-files warn';
+    warn.textContent = `当前选择不含可用文件：已选 ${nonFiles} 个文件夹/磁盘，请选中文件或拖入文件。`;
+    return warn;
+  }
   if (!paths.length) return null;
   const hint = document.createElement('div');
   hint.className = 'tpl-selected-files';
@@ -6354,6 +6364,10 @@ const tpl = {
       const picked = templateSelectedAttachmentPaths();
       picked.forEach((p) => chat.addAttachment(p));
       if (picked.length) toast(`已用当前选中的 ${picked.length} 个文件作为附件`);
+    }
+    if (t.needsFiles && !chat.attachments.length && templateSelectedNonFileCount()) {
+      toast('当前选中的是文件夹或磁盘，这个模板需要文件附件', true);
+      return;
     }
     if (t.needsFiles && !chat.attachments.length) { toast('这个模板需要先把文件拖进对话区作为附件', true); return; }
     const vals = {};

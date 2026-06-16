@@ -38,5 +38,10 @@ assertIncludes('template swap replaces chat attachments', app, 'chat.attachments
 assertIncludes('template swap rerenders chips', app, 'chat.renderChips();');
 assertIncludes('template swap action label', app, '改用当前选中');
 assertIncludes('template swap button style', css, '.tpl-use-selected');
+assertIncludes('template detects non-file selections', app, 'function templateSelectedNonFileCount()');
+assertIncludes('template non-file selection excludes files', app, 'selEntries().filter((e) => e && (e.isDir || e.isDrive)).length');
+assertIncludes('template context warns when selection has no files', app, '当前选择不含可用文件');
+assertIncludes('template run explains folder selection mismatch', app, '当前选中的是文件夹或磁盘，这个模板需要文件附件');
+assertIncludes('template invalid selection style', css, '.tpl-selected-files.warn');
 
 console.log('template-selected-attachments contract ok');
