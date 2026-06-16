@@ -1530,6 +1530,7 @@ function paintSelection(force = false) {
   state.paintedSelected = next;
   state.selectionStats = computeSelectionStats(paths);
   renderStatusbar();
+  refreshTemplateAttachmentContextSummary();
 }
 function paintCutMarks(force = false) {
   if (force) {
@@ -6246,6 +6247,13 @@ function templateAttachmentContextSummary() {
   hint.textContent = `${source} ${paths.length} 个文件：${names}${paths.length > 3 ? ` 等 ${paths.length} 个` : ''}`;
   return hint;
 }
+function refreshTemplateAttachmentContextSummary() {
+  const host = $('#tpl-attachment-context');
+  if (!host) return;
+  host.replaceChildren();
+  const hint = templateAttachmentContextSummary();
+  if (hint) host.appendChild(hint);
+}
 const tpl = {
   data: null,
   dept: localStorage.getItem('fb_tpl_dept') || '通用',
@@ -6302,8 +6310,11 @@ const tpl = {
       const fh = document.createElement('div');
       fh.className = 'tpl-files';
       fh.textContent = `📎 ${t.filesHint || '选中文件或拖进对话区作为附件'}${t.needsFiles ? '（必需）' : '（可选）'}`;
+      const ctx = document.createElement('div');
+      ctx.id = 'tpl-attachment-context';
       const attachmentHint = templateAttachmentContextSummary();
-      if (attachmentHint) fh.appendChild(attachmentHint);
+      if (attachmentHint) ctx.appendChild(attachmentHint);
+      fh.appendChild(ctx);
       form.appendChild(fh);
     }
     const inputs = {};
@@ -6391,7 +6402,9 @@ const chat = {
       c.querySelector('i').onclick = () => { this.attachments.splice(i, 1); this.renderChips(); };
       box.appendChild(c);
     });
+    this.refreshTemplateAttachmentContext();
   },
+  refreshTemplateAttachmentContext() { refreshTemplateAttachmentContextSummary(); },
   async refreshModelLabel() {
     try {
       const r = await api('/api/ai/providers');

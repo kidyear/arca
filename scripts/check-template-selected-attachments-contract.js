@@ -25,7 +25,13 @@ assertIncludes('attachment summary shows queued attachment source', app, '将使
 assertIncludes('attachment summary shows selected file source', app, '将使用当前选中');
 assertIncludes('selected attachment summary shows count', app, '个文件：');
 assertIncludes('template runner renders selected attachment summary', app, 'const attachmentHint = templateAttachmentContextSummary();');
-assertIncludes('template runner appends selected attachment summary', app, 'fh.appendChild(attachmentHint);');
+assertIncludes('template runner appends selected attachment summary', app, 'ctx.appendChild(attachmentHint);');
 assertIncludes('selected attachment summary has a quiet visual style', css, '.tpl-selected-files');
+assertIncludes('template attachment context slot', app, "ctx.id = 'tpl-attachment-context';");
+assertIncludes('template attachment context refresh helper', app, 'function refreshTemplateAttachmentContextSummary()');
+assertIncludes('template attachment context refresh clears stale source', app, 'host.replaceChildren();');
+assertIncludes('selection changes refresh template attachment context', app, 'refreshTemplateAttachmentContextSummary();');
+assertIncludes('chat attachment chip render refreshes template attachment context', app, 'this.refreshTemplateAttachmentContext();');
+assertIncludes('chat refresh helper delegates to template context refresh', app, 'refreshTemplateAttachmentContext() { refreshTemplateAttachmentContextSummary(); }');
 
 console.log('template-selected-attachments contract ok');
