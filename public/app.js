@@ -6236,15 +6236,28 @@ function approvalPathFromArgs(name, args = {}) {
 function templateSelectedAttachmentPaths() {
   return selEntries().filter((e) => e && !e.isDir && !e.isDrive).map((e) => e.path).filter(Boolean);
 }
+function useSelectedFilesForTemplateAttachment() {
+  chat.attachments = templateSelectedAttachmentPaths();
+  chat.renderChips();
+}
 function templateAttachmentContextSummary() {
   const queued = chat && chat.attachments && chat.attachments.length ? chat.attachments : [];
-  const paths = queued.length ? queued : templateSelectedAttachmentPaths();
+  const selected = templateSelectedAttachmentPaths();
+  const paths = queued.length ? queued : selected;
   if (!paths.length) return null;
   const hint = document.createElement('div');
   hint.className = 'tpl-selected-files';
   const names = paths.slice(0, 3).map((p) => baseOf(p)).join('、');
   const source = queued.length ? '将使用对话附件' : '将使用当前选中';
   hint.textContent = `${source} ${paths.length} 个文件：${names}${paths.length > 3 ? ` 等 ${paths.length} 个` : ''}`;
+  if (queued.length && selected.length) {
+    const swap = document.createElement('button');
+    swap.className = 'tpl-use-selected';
+    swap.type = 'button';
+    swap.textContent = '改用当前选中';
+    swap.onclick = useSelectedFilesForTemplateAttachment;
+    hint.appendChild(swap);
+  }
   return hint;
 }
 function refreshTemplateAttachmentContextSummary() {

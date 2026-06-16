@@ -33,5 +33,10 @@ assertIncludes('template attachment context refresh clears stale source', app, '
 assertIncludes('selection changes refresh template attachment context', app, 'refreshTemplateAttachmentContextSummary();');
 assertIncludes('chat attachment chip render refreshes template attachment context', app, 'this.refreshTemplateAttachmentContext();');
 assertIncludes('chat refresh helper delegates to template context refresh', app, 'refreshTemplateAttachmentContext() { refreshTemplateAttachmentContextSummary(); }');
+assertIncludes('template can swap queued attachments to current selection', app, 'function useSelectedFilesForTemplateAttachment()');
+assertIncludes('template swap replaces chat attachments', app, 'chat.attachments = templateSelectedAttachmentPaths();');
+assertIncludes('template swap rerenders chips', app, 'chat.renderChips();');
+assertIncludes('template swap action label', app, '改用当前选中');
+assertIncludes('template swap button style', css, '.tpl-use-selected');
 
 console.log('template-selected-attachments contract ok');
