@@ -1385,7 +1385,7 @@ function maybeRenameBySlowClick(ev, el, e, wasSelected) {
 function gridItem(e, i) {
   const el = document.createElement('div');
   const chg = state.changed && state.changed.get(e.name);
-  el.className = 'item' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (state.multiSel.has(e.path) || state.selected === e.path ? ' selected' : '') + (isCutPath(e.path) ? ' cutting' : '') + (chg ? ' changed' : '');
+  el.className = 'item' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (isSelectedPath(e.path) ? ' selected' : '') + (isCutPath(e.path) ? ' cutting' : '') + (chg ? ' changed' : '');
   el.dataset.idx = i;
   el.dataset.path = e.path;
   if (chg) { el.dataset.changed = chg.count > 1 ? '改·' + chg.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chg.count * 0.12).toFixed(2)); if (chg.files.size) el.title = '刚变更：\n' + [...chg.files].join('\n'); }
@@ -1396,7 +1396,7 @@ function gridItem(e, i) {
 function listRow(e, i) {
   const el = document.createElement('div');
   const chgR = state.changed && state.changed.get(e.name);
-  el.className = 'row' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (state.multiSel.has(e.path) || state.selected === e.path ? ' selected' : '') + (isCutPath(e.path) ? ' cutting' : '') + (chgR ? ' changed' : '');
+  el.className = 'row' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (isSelectedPath(e.path) ? ' selected' : '') + (isCutPath(e.path) ? ' cutting' : '') + (chgR ? ' changed' : '');
   el.dataset.idx = i;
   el.dataset.path = e.path;
   if (chgR) { el.dataset.changed = chgR.count > 1 ? '改·' + chgR.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chgR.count * 0.12).toFixed(2)); if (chgR.files.size) el.title = '刚变更：\n' + [...chgR.files].join('\n'); }
@@ -1683,6 +1683,9 @@ function pathContains(base, target) {
   return t.startsWith(b + '/');
 }
 // 当前生效的选择集：多选优先，否则单选
+function isSelectedPath(path) {
+  return state.multiSel.size ? state.multiSel.has(path) : state.selected === path;
+}
 function selPaths() {
   if (state.multiSel.size) return [...state.multiSel];
   return state.selected ? [state.selected] : [];
@@ -6229,6 +6232,9 @@ function approvalPathFromArgs(name, args = {}) {
 
 // ---------- 任务模板：把高频场景封装成「卡片 + 填空」，员工不用写提示词 ----------
 // 模板是数据：~/.fanbox/templates.json（管理员自定义）> 内置 templates.default.json
+function templateSelectedAttachmentPaths() {
+  return selEntries().filter((e) => e && !e.isDir && !e.isDrive).map((e) => e.path).filter(Boolean);
+}
 const tpl = {
   data: null,
   dept: localStorage.getItem('fb_tpl_dept') || '通用',
@@ -6253,7 +6259,7 @@ const tpl = {
     if (!depts.includes(this.dept)) this.dept = depts[1] || '全部';
     // 选部门 = 该部门专属 + 通用（员工视角两类都用得上）；选「全部」看全部
     const list = this.data.templates.filter((t) => this.dept === '全部' || t.dept === this.dept || t.dept === '通用');
-    box.innerHTML = '<div class="tpl-head">任务模板 <span class="tpl-sub">选卡片 → 拖文件 → 填一两句 → 开工</span></div>';
+    box.innerHTML = '<div class="tpl-head">任务模板 <span class="tpl-sub">选卡片 → 选/拖文件 → 填一两句 → 开工</span></div>';
     const chips = document.createElement('div');
     chips.className = 'tpl-chips';
     depts.forEach((d) => {
@@ -6284,7 +6290,7 @@ const tpl = {
     if (t.needsFiles || t.filesHint) {
       const fh = document.createElement('div');
       fh.className = 'tpl-files';
-      fh.textContent = `📎 ${t.filesHint || '把相关文件拖进对话区作为附件'}${t.needsFiles ? '（必需）' : '（可选）'}`;
+      fh.textContent = `📎 ${t.filesHint || '选中文件或拖进对话区作为附件'}${t.needsFiles ? '（必需）' : '（可选）'}`;
       form.appendChild(fh);
     }
     const inputs = {};
@@ -6307,6 +6313,11 @@ const tpl = {
     chat.scroll();
   },
   run(t, inputs) {
+    if (t.needsFiles && !chat.attachments.length) {
+      const picked = templateSelectedAttachmentPaths();
+      picked.forEach((p) => chat.addAttachment(p));
+      if (picked.length) toast(`已用当前选中的 ${picked.length} 个文件作为附件`);
+    }
     if (t.needsFiles && !chat.attachments.length) { toast('这个模板需要先把文件拖进对话区作为附件', true); return; }
     const vals = {};
     for (const f of (t.fields || [])) {
