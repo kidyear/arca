@@ -19,10 +19,13 @@ assertIncludes('template run gives feedback', app, '已用当前选中的');
 assertIncludes('template still falls back to explicit attach error', app, "toast('这个模板需要先把文件拖进对话区作为附件', true);");
 assertIncludes('template picker copy mentions select or drag', app, '选卡片 → 选/拖文件 → 填一两句 → 开工');
 assertIncludes('template file hint mentions selected files', app, '选中文件或拖进对话区作为附件');
-assertIncludes('selected attachment summary helper', app, 'function templateSelectedAttachmentSummary()');
-assertIncludes('selected attachment summary shows count', app, '当前已选');
-assertIncludes('template runner renders selected attachment summary', app, 'const selectedHint = templateSelectedAttachmentSummary();');
-assertIncludes('template runner appends selected attachment summary', app, 'fh.appendChild(selectedHint);');
+assertIncludes('selected attachment summary helper', app, 'function templateAttachmentContextSummary()');
+assertIncludes('attachment summary prioritizes queued chat attachments', app, 'const queued = chat && chat.attachments && chat.attachments.length ? chat.attachments : [];');
+assertIncludes('attachment summary shows queued attachment source', app, '将使用对话附件');
+assertIncludes('attachment summary shows selected file source', app, '将使用当前选中');
+assertIncludes('selected attachment summary shows count', app, '个文件：');
+assertIncludes('template runner renders selected attachment summary', app, 'const attachmentHint = templateAttachmentContextSummary();');
+assertIncludes('template runner appends selected attachment summary', app, 'fh.appendChild(attachmentHint);');
 assertIncludes('selected attachment summary has a quiet visual style', css, '.tpl-selected-files');
 
 console.log('template-selected-attachments contract ok');
