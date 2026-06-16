@@ -1531,6 +1531,7 @@ function paintSelection(force = false) {
   state.selectionStats = computeSelectionStats(paths);
   renderStatusbar();
   refreshTemplateAttachmentContextSummary();
+  refreshChatComposerContext();
 }
 function paintCutMarks(force = false) {
   if (force) {
@@ -6236,8 +6237,74 @@ function approvalPathFromArgs(name, args = {}) {
 function templateSelectedAttachmentPaths() {
   return selEntries().filter((e) => e && !e.isDir && !e.isDrive).map((e) => e.path).filter(Boolean);
 }
+function chatSelectedFilePaths() {
+  return selEntries().filter((e) => e && !e.isDir && !e.isDrive).map((e) => e.path).filter(Boolean);
+}
+function chatSelectedAttachablePaths() {
+  return selEntries().filter((e) => e && !e.isDrive).map((e) => e.path).filter(Boolean);
+}
 function templateSelectedNonFileCount() {
   return selEntries().filter((e) => e && (e.isDir || e.isDrive)).length;
+}
+function chatSelectedNonFileCount() {
+  return selEntries().filter((e) => e && (e.isDir || e.isDrive)).length;
+}
+function chatSelectedDriveCount() {
+  return selEntries().filter((e) => e && e.isDrive).length;
+}
+function attachSelectedFilesToChat() {
+  const picked = chatSelectedAttachablePaths();
+  chatSelectedAttachablePaths().forEach((p) => chat.addAttachment(p));
+  if (picked.length) toast(`已附加当前选中的 ${picked.length} 个路径`);
+}
+function clearChatAttachments() {
+  chat.attachments = [];
+  chat.renderChips();
+  toast('已清空对话附件');
+}
+function renderSentAttachmentSummary(paths) {
+  const at = document.createElement('div');
+  at.className = 'chat-user-atts';
+  at.append('📎 ');
+  (paths || []).forEach((p) => {
+    at.appendChild(chatPathActionNode(p));
+  });
+  return at;
+}
+function refreshChatComposerContext() {
+  const hint = $('#chat-context-hint');
+  if (!hint) return;
+  let attachments = [];
+  try { attachments = chat && chat.attachments ? chat.attachments : []; } catch { attachments = []; }
+  const selected = chatSelectedAttachablePaths();
+  const driveCount = chatSelectedDriveCount();
+  hint.classList.toggle('hidden', !attachments.length && !selected.length && !driveCount);
+  hint.replaceChildren();
+  if (attachments.length) {
+    const names = attachments.slice(0, 3).map((p) => baseOf(p)).join('、');
+    hint.innerHTML = `已附加 <strong>${attachments.length}</strong> 个路径：${escapeHtml(names)}${attachments.length > 3 ? ' 等' : ''}`;
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'chat-clear-attachments';
+    clear.textContent = '清空附件';
+    clear.onclick = clearChatAttachments;
+    hint.append(' ', clear);
+    return;
+  }
+  if (selected.length) {
+    const names = selected.slice(0, 3).map((p) => baseOf(p)).join('、');
+    hint.innerHTML = `当前选中 <strong>${selected.length}</strong> 个文件/文件夹：${escapeHtml(names)}${selected.length > 3 ? ' 等' : ''}。普通对话需附加路径，任务模板会自动使用选中文件。`;
+    const attach = document.createElement('button');
+    attach.type = 'button';
+    attach.className = 'chat-use-selected';
+    attach.textContent = '附加选中';
+    attach.onclick = attachSelectedFilesToChat;
+    hint.appendChild(attach);
+    return;
+  }
+  if (driveCount) {
+    hint.textContent = `当前选中的是磁盘 ${driveCount} 项；如需让 AI 使用具体内容，请进入磁盘内的文件夹或选中文件后再附加。`;
+  }
 }
 function useSelectedFilesForTemplateAttachment() {
   chat.attachments = templateSelectedAttachmentPaths();
@@ -6395,6 +6462,7 @@ const chat = {
     localStorage.setItem('fb_term_open', '1');
     this.refreshModelLabel();
     this.loadChats();
+    this.refreshComposerContext();
     // 没在任何会话里时展示任务模板（卡片不打扰已有对话）
     if (!this.currentChat && !$('#tpl-area') && !$('#chat-msgs .chat-msg')) tpl.showPicker();
   },
@@ -6424,14 +6492,32 @@ const chat = {
     this.attachments.forEach((p, i) => {
       const c = document.createElement('span');
       c.className = 'chat-chip';
-      c.innerHTML = `📎 ${escapeHtml(baseOf(p))} <i title="移除">✕</i>`;
       c.title = p;
-      c.querySelector('i').onclick = () => { this.attachments.splice(i, 1); this.renderChips(); };
+      c.append('📎 ');
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'chat-chip-open';
+      open.textContent = baseOf(p);
+      open.title = p;
+      open.onclick = () => openChatPathReference(p);
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'chat-chip-copy';
+      copy.textContent = '复制';
+      copy.title = '复制完整路径';
+      copy.onclick = () => copyPath(p);
+      const remove = document.createElement('i');
+      remove.title = '移除';
+      remove.textContent = '✕';
+      remove.onclick = () => { this.attachments.splice(i, 1); this.renderChips(); };
+      c.append(open, ' ', copy, ' ', remove);
       box.appendChild(c);
     });
     this.refreshTemplateAttachmentContext();
+    this.refreshComposerContext();
   },
   refreshTemplateAttachmentContext() { refreshTemplateAttachmentContextSummary(); },
+  refreshComposerContext() { refreshChatComposerContext(); },
   async refreshModelLabel() {
     try {
       const r = await api('/api/ai/providers');
@@ -6612,10 +6698,7 @@ const chat = {
     const u = this.msgEl('user');
     u.textContent = displayText || text;
     if (payload.attachments.length) {
-      const at = document.createElement('div');
-      at.className = 'chat-user-atts';
-      at.textContent = '📎 ' + payload.attachments.map(baseOf).join('、');
-      u.appendChild(at);
+      u.appendChild(renderSentAttachmentSummary(payload.attachments));
     }
     if (forcedText === undefined) input.value = '';
     this.attachments = [];
