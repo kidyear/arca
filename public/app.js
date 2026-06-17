@@ -2007,8 +2007,8 @@ function previewPlaceholder(e, msg = '这个项目没有可用预览') {
   mona.disposeIfAny(); crepe.disposeIfAny(); imgEditState = null;
   showPreviewPanel();
   $('#preview-title').textContent = e.name;
-  $('#preview-actions').innerHTML = '';
-  renderPreviewFoot(null);
+  renderPreviewActions(e);
+  renderPreviewFoot(e);
   const body = setPreviewBodyMode();
   body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>${escapeHtml(msg)}</div>`;
 }
@@ -2445,6 +2445,26 @@ async function showDiff(e) {
 function renderPreviewActions(e) {
   const box = $('#preview-actions');
   box.innerHTML = '';
+  const mount = (acts) => {
+    acts.forEach((a) => {
+      const b = document.createElement('button');
+      b.className = (a.cls || '') + (a.label ? '' : ' icon-only');
+      // 有可见文字的按钮不需气泡；纯图标按钮用 data-tip 即时气泡（不再用慢吞吞的原生 title）
+      if (!a.label && a.title) b.dataset.tip = a.title;
+      b.innerHTML = a.label ? `${a.icon}<span>${a.label}</span>` : a.icon;
+      b.onclick = a.fn;
+      box.appendChild(b);
+    });
+  };
+  if (e.isDir) {
+    mount([
+      { icon: ic('folder', 'currentColor', 14), label: '打开', title: '进入文件夹', cls: 'primary', fn: () => navigate(e.path) },
+      { icon: ic('data', 'currentColor', 15), label: '属性', title: '查看属性', fn: () => propertiesPanel([e]) },
+      { icon: ic('folder', 'currentColor', 15), title: '在文件管理器中显示', fn: () => openWith(e.path, 'reveal') },
+      { icon: ic('clip', 'currentColor', 15), title: '复制路径', fn: () => copyPath(e.path) },
+    ]);
+    return;
+  }
   const clip = window.fanboxClipboard;
   // 图标为主、文字精简：主操作「打开」留字，其余只留图标 + tooltip
   const acts = [
@@ -2459,15 +2479,7 @@ function renderPreviewActions(e) {
     ...(clip ? [{ icon: ic('copy', 'currentColor', 15), title: '复制文件（系统文件管理器可粘贴）', fn: () => copyFile(e.path) }] : []),
     { icon: ic('clip', 'currentColor', 15), title: '复制路径', fn: () => copyPath(e.path) },
   ];
-  acts.forEach((a) => {
-    const b = document.createElement('button');
-    b.className = (a.cls || '') + (a.label ? '' : ' icon-only');
-    // 有可见文字的按钮不需气泡；纯图标按钮用 data-tip 即时气泡（不再用慢吞吞的原生 title）
-    if (!a.label && a.title) b.dataset.tip = a.title;
-    b.innerHTML = a.label ? `${a.icon}<span>${a.label}</span>` : a.icon;
-    b.onclick = a.fn;
-    box.appendChild(b);
-  });
+  mount(acts);
 }
 // 预览底部：大小 · 创建 · 修改
 function fmtDateTime(ms) {
