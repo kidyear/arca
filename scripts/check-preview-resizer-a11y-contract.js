@@ -23,6 +23,11 @@ assertIncludes('preview resizer is a separator', html, 'id="preview-resizer" cla
 assertIncludes('preview resizer is keyboard focusable', html, 'tabindex="0"');
 assertIncludes('preview resizer label explains action', html, 'aria-label="调整预览窗格大小"');
 assertIncludes('preview resizer focus affordance', css, '#preview-resizer:focus-visible::after');
+assertIncludes('preview resizer has discoverable hit area', css, '#preview-resizer { flex: 0 0 14px;');
+assertIncludes('preview resizer default rail is visible', css, '#preview-resizer::after {');
+assertIncludes('preview resizer rail is visible before hover', css, 'opacity: 0.55;');
+assertIncludes('preview resizer has a grip affordance', css, '#preview-resizer::before {');
+assertIncludes('preview resizer grip uses repeated marks', css, 'repeating-linear-gradient');
 
 assertIncludes('preview resize bounds helper exists', app, 'function previewResizeBounds()');
 assertIncludes('preview resize apply helper exists', app, 'function applyPreviewResizeValue(value, persist)');

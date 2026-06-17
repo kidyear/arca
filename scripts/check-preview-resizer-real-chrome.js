@@ -4,7 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const APP_PORT = 4567;
@@ -31,7 +31,7 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForExit(child, timeoutMs = 2000) {
+async function waitForExit(child, timeoutMs = 5000) {
   if (child.exitCode !== null || child.signalCode) return;
   await new Promise((resolve) => {
     const timer = setTimeout(resolve, timeoutMs);
@@ -42,14 +42,24 @@ async function waitForExit(child, timeoutMs = 2000) {
   });
 }
 
+async function killTree(child) {
+  if (!child || !child.pid || child.exitCode !== null || child.signalCode) return;
+  if (process.platform === 'win32') {
+    spawnSync('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    child.kill('SIGKILL');
+  }
+  await waitForExit(child);
+}
+
 async function rmRetry(target) {
-  for (let i = 0; i < 8; i += 1) {
+  for (let i = 0; i < 20; i += 1) {
     try {
       fs.rmSync(target, { recursive: true, force: true });
       return;
     } catch (err) {
-      if (i === 7) throw err;
-      await wait(150);
+      if (i === 19) throw err;
+      await wait(250);
     }
   }
 }
@@ -169,14 +179,22 @@ async function main() {
     const result = await client.send('Runtime.evaluate', {
       returnByValue: true,
       awaitPromise: true,
-      expression: `(() => {
+      expression: `(async () => {
         localStorage.setItem('fb_guided', '1');
+        document.querySelector('.guide-overlay')?.remove();
         localStorage.removeItem('fb_preview_w');
         showPreviewPanel();
+        const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+        await nextFrame();
         const handle = document.querySelector('#preview-resizer');
         const preview = document.querySelector('#preview');
+        window.focus();
+        handle.focus({ preventScroll: true });
+        await nextFrame();
+        const handleRect = handle.getBoundingClientRect();
+        const afterStyle = getComputedStyle(handle, '::after');
+        const beforeStyle = getComputedStyle(handle, '::before');
         const before = preview.style.flexBasis;
-        handle.focus();
         handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
         const afterLeft = preview.style.flexBasis;
         const storedLeft = localStorage.getItem('fb_preview_w');
@@ -186,6 +204,14 @@ async function main() {
         return {
           active: document.activeElement === handle,
           activeId: document.activeElement && document.activeElement.id,
+          tabIndex: handle.tabIndex,
+          role: handle.getAttribute('role'),
+          handleHidden: handle.classList.contains('hidden'),
+          handleWidth: Math.round(handleRect.width),
+          railOpacity: afterStyle.opacity,
+          railBackground: afterStyle.backgroundColor,
+          gripImage: beforeStyle.backgroundImage,
+          gripOpacity: beforeStyle.opacity,
           before,
           afterLeft,
           storedLeft,
@@ -209,8 +235,12 @@ async function main() {
     const value = result.result && result.result.value;
     if (!value) throw new Error(`No preview resize result returned: ${JSON.stringify(result)}`);
     if (value.hidden) throw new Error(`preview panel stayed hidden: ${JSON.stringify(value)}`);
-    if (!value.active) throw new Error(`preview resizer did not receive focus: ${JSON.stringify(value)}`);
+    if (value.handleHidden) throw new Error(`preview resizer handle stayed hidden: ${JSON.stringify(value)}`);
+    if (value.tabIndex !== 0 || value.role !== 'separator') throw new Error(`preview resizer should be keyboard focusable separator: ${JSON.stringify(value)}`);
     if (value.orientation !== 'vertical') throw new Error(`expected vertical preview separator, got ${value.orientation}`);
+    if (value.handleWidth < 12) throw new Error(`preview resizer hit area should be easy to grab: ${JSON.stringify(value)}`);
+    if (Number(value.railOpacity) < 0.5) throw new Error(`preview resizer rail should be visible by default: ${JSON.stringify(value)}`);
+    if (!String(value.gripImage || '').includes('repeating-linear-gradient')) throw new Error(`preview resizer grip should be visible: ${JSON.stringify(value)}`);
     if (!/px$/.test(value.afterLeft || '')) throw new Error(`ArrowLeft did not set px flex-basis: ${value.afterLeft}`);
     if (value.storedLeft !== value.ariaLeft) throw new Error(`stored width ${value.storedLeft} != aria ${value.ariaLeft}`);
     if (value.afterHome !== '260px' || value.ariaHome !== '260') {
@@ -223,10 +253,7 @@ async function main() {
     console.log(JSON.stringify(value, null, 2));
   } finally {
     if (client) client.close();
-    if (browser) {
-      browser.kill();
-      await waitForExit(browser);
-    }
+    await killTree(browser);
     server.kill();
     await waitForExit(server);
     await rmRetry(profileDir);

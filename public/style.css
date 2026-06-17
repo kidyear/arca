@@ -665,14 +665,24 @@ kbd {
 
 /* 预览面板拖拽手柄 */
 /* 预览分隔条：作为 flex 同级；轴向随 dock 翻转 */
-#preview-resizer { flex: 0 0 6px; background: transparent; z-index: 5; position: relative; }
+#preview-resizer { flex: 0 0 14px; background: transparent; z-index: 5; position: relative; touch-action: none; }
 #preview-resizer.hidden { display: none; }
-.dock-bottom #preview-resizer { cursor: col-resize; }
-.dock-right #preview-resizer { cursor: row-resize; }
-/* 拖拽条平时隐形，hover/拖动时浮现 2px 细线（inset 2px 同时适配横竖两个方向） */
-#preview-resizer::after, #terminal-resizer::after { content: ''; position: absolute; inset: 2px; border-radius: 1px; background: var(--accent); opacity: 0; transition: opacity 0.15s ease 0.08s; }
+.dock-bottom #preview-resizer { cursor: col-resize; margin-left: -4px; margin-right: -4px; }
+.dock-right #preview-resizer { cursor: row-resize; margin-top: -4px; margin-bottom: -4px; }
+/* 预览分隔条默认给轻量轨道和 grip，避免用户不知道右侧预览可拖动；终端分隔条仍保持 hover 才浮现。 */
+#preview-resizer::after { content: ''; position: absolute; border-radius: 2px; background: var(--border); opacity: 0.55; transition: opacity 0.12s ease, background 0.12s ease; }
+.dock-bottom #preview-resizer::after { top: 9px; bottom: 9px; left: 6px; width: 2px; }
+.dock-right #preview-resizer::after { left: 9px; right: 9px; top: 6px; height: 2px; }
+#preview-resizer::before { content: ''; position: absolute; opacity: 0.72; border-radius: 4px; transition: opacity 0.12s ease, background 0.12s ease; }
+.dock-bottom #preview-resizer::before { left: 4px; top: 50%; width: 6px; height: 24px; transform: translateY(-50%); background: repeating-linear-gradient(to bottom, transparent 0 3px, var(--text-faint) 3px 5px, transparent 5px 8px); }
+.dock-right #preview-resizer::before { top: 4px; left: 50%; height: 6px; width: 24px; transform: translateX(-50%); background: repeating-linear-gradient(to right, transparent 0 3px, var(--text-faint) 3px 5px, transparent 5px 8px); }
+#terminal-resizer::after { content: ''; position: absolute; inset: 2px; border-radius: 1px; background: var(--accent); opacity: 0; transition: opacity 0.15s ease 0.08s; }
 #preview-resizer:hover::after, #preview-resizer:focus-visible::after, #preview-resizer.dragging::after,
 #terminal-resizer:hover::after, #terminal-resizer.dragging::after { opacity: 0.55; }
+#preview-resizer:hover::after, #preview-resizer:focus-visible::after, #preview-resizer.dragging::after { opacity: 1; background: var(--accent); }
+#preview-resizer:hover::before, #preview-resizer:focus-visible::before, #preview-resizer.dragging::before { opacity: 1; }
+.dock-bottom #preview-resizer:hover::before, .dock-bottom #preview-resizer:focus-visible::before, .dock-bottom #preview-resizer.dragging::before { background: repeating-linear-gradient(to bottom, transparent 0 3px, var(--accent) 3px 5px, transparent 5px 8px); }
+.dock-right #preview-resizer:hover::before, .dock-right #preview-resizer:focus-visible::before, .dock-right #preview-resizer.dragging::before { background: repeating-linear-gradient(to right, transparent 0 3px, var(--accent) 3px 5px, transparent 5px 8px); }
 .pv-img { cursor: zoom-in; }
 /* 透明图垫棋盘格，白色/透明 PNG 也能看清边界 */
 .grid .item .icon .thumb, .pv-img, .lightbox img, .list .row .icon .thumb-sm {
