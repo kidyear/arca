@@ -1280,7 +1280,7 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 .chat-copy-attachments:hover { color: var(--accent); border-color: var(--accent); }
 .chat-clear-attachments { margin-left: 0; border: 1px solid var(--border); color: var(--text-dim); background: var(--bg-3); border-radius: 6px; padding: 1px 7px; font-size: 11px; cursor: pointer; }
 .chat-clear-attachments:hover { color: var(--accent); border-color: var(--accent); }
-#chat-input { width: 100%; resize: none; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; line-height: 1.5; }
+#chat-input { width: 100%; resize: none; max-height: 150px; overflow-y: hidden; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; line-height: 1.5; }
 #chat-input:focus { border-color: var(--accent); outline: none; }
 .chat-bar { display: flex; align-items: center; gap: 8px; }
 #chat-stop.hidden { display: none; }

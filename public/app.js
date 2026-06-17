@@ -7425,6 +7425,7 @@ const chat = {
     this.updateComposer();
     $('#chat-msgs').innerHTML = '<div class="chat-empty"><p>新对话。这次对话会绑定当前浏览的目录：' + escapeHtml(tilde(state.cwd || '~')) + '</p></div>';
     tpl.showPicker();
+    this.resizeInput();
     $('#chat-input').focus();
   },
   // 按会话记账的运行状态：每个会话各自有发送/停止态，多会话可并行、各停各的
@@ -7537,6 +7538,15 @@ const chat = {
     stop.disabled = stopping;
     stop.title = stopping ? '正在停止当前对话' : '停止当前对话';
   },
+  resizeInput() {
+    const input = $('#chat-input');
+    if (!input) return;
+    input.style.height = 'auto';
+    const max = parseFloat(getComputedStyle(input).maxHeight) || 150;
+    const next = Math.min(input.scrollHeight, max);
+    input.style.height = next + 'px';
+    input.style.overflowY = input.scrollHeight > max ? 'auto' : 'hidden';
+  },
   hasComposerText() { return !!String($('#chat-input')?.value || '').trim(); },
   // forcedText：跳过输入框直接发这段文字（任务模板组装的提示词走这里）
   // displayText：用户气泡里显示的人话摘要（不给非技术用户看大段提示词）
@@ -7562,7 +7572,7 @@ const chat = {
     if (payload.attachments.length) {
       u.appendChild(renderSentAttachmentSummary(payload.attachments));
     }
-    if (forcedText === undefined) input.value = '';
+    if (forcedText === undefined) { input.value = ''; this.resizeInput(); }
     this.attachments = [];
     this.renderChips();
     this.busyChats.add(busyKey);
@@ -7583,6 +7593,7 @@ const chat = {
       if (draftText && !String(input.value || '').trim()) {
         input.value = draftText;
         input.dispatchEvent(new Event('input', { bubbles: true }));
+        this.resizeInput();
         restored = true;
       }
       if (draftAttachments.length && !this.attachments.length) {
@@ -7812,7 +7823,7 @@ const chat = {
     this.initSideResize();
     this.initScrollFollow();
     const input = $('#chat-input');
-    input.addEventListener('input', () => this.updateComposer());
+    input.addEventListener('input', () => { this.resizeInput(); this.updateComposer(); });
     input.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.send(); }
