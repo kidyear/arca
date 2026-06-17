@@ -1312,9 +1312,11 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 
 /* ---------- 会话列表（对话面板左栏）---------- */
 #chat-side { flex: 0 0 var(--chat-side-w, 168px); min-width: 132px; max-width: min(42vw, 420px); display: flex; flex-direction: column; background: var(--bg-2); min-height: 0; }
-#chat-side-resizer { flex: 0 0 7px; margin-left: -3px; margin-right: -4px; cursor: col-resize; position: relative; z-index: 3; touch-action: none; }
-#chat-side-resizer::after { content: ''; position: absolute; inset: 0 3px; background: var(--border); opacity: 0; transition: opacity 0.12s ease; }
+#chat-side-resizer { flex: 0 0 14px; margin-left: -5px; margin-right: -7px; cursor: col-resize; position: relative; z-index: 3; touch-action: none; }
+#chat-side-resizer::after { content: ''; position: absolute; top: 9px; bottom: 9px; left: 6px; width: 2px; border-radius: 2px; background: var(--border); opacity: 0.55; transition: opacity 0.12s ease, background 0.12s ease; }
+#chat-side-resizer::before { content: ''; position: absolute; left: 4px; top: 50%; width: 6px; height: 24px; transform: translateY(-50%); border-radius: 4px; opacity: 0.72; background: repeating-linear-gradient(to bottom, transparent 0 3px, var(--text-faint) 3px 5px, transparent 5px 8px); }
 #chat-side-resizer:hover::after, #chat-side-resizer:focus-visible::after, body.chat-side-resizing #chat-side-resizer::after { opacity: 1; background: var(--accent); }
+#chat-side-resizer:hover::before, #chat-side-resizer:focus-visible::before, body.chat-side-resizing #chat-side-resizer::before { opacity: 1; background: repeating-linear-gradient(to bottom, transparent 0 3px, var(--accent) 3px 5px, transparent 5px 8px); }
 body.chat-side-resizing { cursor: col-resize; user-select: none; }
 #chat-new { margin: 8px 8px 6px; padding: 6px 0; font-size: 12px; font-weight: 600; color: var(--accent); border: 1px dashed var(--accent); border-radius: 8px; cursor: pointer; background: transparent; }
 #chat-new:hover { background: var(--accent-soft); }
