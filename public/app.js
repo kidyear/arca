@@ -7277,7 +7277,12 @@ const chat = {
       row.onclick = () => this.openChat(c.id);
       row.querySelector('.ci-del').onclick = async (e) => {
         e.stopPropagation();
-        await fetch('/api/ai/chat-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) }).catch(() => {});
+        const ok = await confirmDialog(`删除这个对话？\n${fullTitle}`);
+        if (!ok) return;
+        const r = await fetch('/api/ai/chat-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id }) })
+          .then((res) => res.json().catch(() => ({ ok: res.ok })))
+          .catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
+        if (r && r.ok === false) { toast('删除会话失败：' + friendlyErrorText(r), true); return; }
         if (this.currentChat === c.id) this.newChat();
         this.loadChats();
       };
