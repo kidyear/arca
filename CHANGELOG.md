@@ -11,6 +11,9 @@
 
 ## [Unreleased]
 
+### Tests
+- 文本预览新增真实工程文件回归，直接验证 `重要说明.txt` 这类 GBK/ANSI 老 Windows 说明文件通过 `/api/read` 返回可读中文且不含乱码。
+
 ## [1.0.93] - 2026-06-18
 
 ### Fixed
