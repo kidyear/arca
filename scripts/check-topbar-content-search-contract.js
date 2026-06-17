@@ -48,9 +48,20 @@ const renderStatusbar = sliceFunction(app, 'renderStatusbar');
 assertIncludes('statusbar labels content search', renderStatusbar, '内容搜索');
 assertIncludes('statusbar branches on content search mode', renderStatusbar, 'state.searchContentMode');
 
+const renderSearchFailure = sliceFunction(app, 'renderSearchFailure');
+assertIncludes('content search failures keep mode label', renderSearchFailure, 'state.searchContentMode ? \'内容搜索失败\'');
+assertIncludes('content search failures show content hint', renderSearchFailure, '文件正文');
+
+const renderFiles = sliceFunction(app, 'renderFiles');
+assertIncludes('empty content search has specific message', renderFiles, '没有在文件内容中搜索到');
+assertIncludes('empty content search explains filename search alternative', renderFiles, '不带“内容:”则按文件名搜索');
+
 const listRow = sliceFunction(app, 'listRow');
 assertIncludes('list row renders hit snippets', listRow, 'rowHitHtml(e)');
 assertIncludes('hit snippet helper exists', app, 'function rowHitHtml(e)');
+
+const rowHitHtml = sliceFunction(app, 'rowHitHtml');
+assertIncludes('content hit label says body', rowHitHtml, '正文');
 
 assertIncludes('row hit css exists', css, '.list .row .row-hit');
 assertIncludes('row hit css wraps long snippets', css, 'overflow-wrap: anywhere;');

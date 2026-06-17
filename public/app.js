@@ -1084,6 +1084,7 @@ async function searchCurrentTree() {
   const root = state.cwd;
   state.filter = '';
   state.searchBaseEntries = state.searchMode ? (state.searchBaseEntries || state.entries) : state.entries;
+  state.searchContentMode = isContent;
   state.selected = null;
   state.multiSel.clear();
   state.selectionAnchor = null;
@@ -1096,7 +1097,6 @@ async function searchCurrentTree() {
     state.searchQuery = term;
     state.searchRoot = root;
     state.searchTruncated = !!data.truncated;
-    state.searchContentMode = isContent;
     state.recentMode = false;
     state.skillsMode = false;
     state.virtualMode = null;
@@ -1124,9 +1124,14 @@ function friendlySearchError(err) {
 function renderSearchFailure(term, root, err) {
   const area = $('#file-area');
   const reason = friendlySearchError(err);
+  const title = state.searchContentMode ? '内容搜索失败' : '搜索子文件夹失败';
+  const hint = state.searchContentMode
+    ? '搜索范围：文件正文。若要按文件名搜索，请去掉“内容:”前缀。'
+    : '搜索范围：文件名。若要搜文件正文，请输入“内容:关键词”。';
   area.innerHTML = `<div class="empty-state"><div class="big">${ic('search', 'currentColor', 48)}</div>
-    搜索子文件夹失败<br>
+    ${title}<br>
     <span class="empty-hint">关键词：${escapeHtml(term)} · 位置：${escapeHtml(root)}</span><br>
+    <span class="empty-hint">${escapeHtml(hint)}</span><br>
     <span class="empty-hint">${escapeHtml(reason)}</span><br><br>
     <button class="ghost-btn" id="search-retry">重试</button>
     <button class="ghost-btn" id="search-back">返回当前目录</button>
@@ -1317,7 +1322,11 @@ function renderFiles() {
   state.selectionStats = computeSelectionStats();
   renderStatusbar();
   if (!list.length) {
-    const emptyMsg = state.searchMode ? `没有搜索到「${escapeHtml(state.searchQuery)}」` : (state.filter ? `没有匹配「${escapeHtml(state.filter)}」的项目` : (state.recentMode ? '没找到最近修改的文件' : '这个文件夹是空的'));
+    const emptyMsg = state.searchMode
+      ? (state.searchContentMode
+        ? `没有在文件内容中搜索到「${escapeHtml(state.searchQuery)}」<br><span class="empty-hint">不带“内容:”则按文件名搜索当前目录树。</span>`
+        : `没有搜索到「${escapeHtml(state.searchQuery)}」`)
+      : (state.filter ? `没有匹配「${escapeHtml(state.filter)}」的项目` : (state.recentMode ? '没找到最近修改的文件' : '这个文件夹是空的'));
     const emptyIc = (state.filter || state.searchMode) ? 'search' : (state.recentMode ? 'clock' : 'inbox');
     area.innerHTML = `<div class="empty-state"><div class="big">${ic(emptyIc, 'currentColor', 48)}</div>${emptyMsg}</div>`;
     return;
@@ -1475,7 +1484,7 @@ function fileItemTitle(e, changed) {
 function rowHitHtml(e) {
   if (!e || !e.content || !Array.isArray(e.hits) || !e.hits.length) return '';
   const lines = e.hits.slice(0, 2).map((h) => {
-    const label = Number.isFinite(Number(h.line)) ? `L${Number(h.line)}` : '命中';
+    const label = Number.isFinite(Number(h.line)) ? `正文 L${Number(h.line)}` : '正文';
     return `<div class="row-hit"><span>${label}</span>${escapeHtml(String(h.text || '').slice(0, 220))}</div>`;
   });
   return `<div class="row-hits">${lines.join('')}</div>`;
