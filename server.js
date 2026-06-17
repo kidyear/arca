@@ -15,6 +15,8 @@ const os = require('os');
 const crypto = require('crypto');
 const { exec, spawn, execFile } = require('child_process');
 const { URL } = require('url');
+const JSZip = require('jszip');
+const XLSX = require('xlsx');
 const { decodeTextPreviewBuffer, encodeTextPreviewBuffer } = require('./lib/text-preview-decoder');
 
 const HOME = os.homedir();
@@ -53,6 +55,7 @@ const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac']);
 const PDF_EXT = new Set(['pdf']);
 const ARCHIVE_EXT = new Set(['zip', 'jar', 'tar', 'tgz', 'gz', 'bz2', 'xz', '7z', 'rar']);
 const SHORTCUT_EXT = new Set(['lnk', 'url']);
+const OFFICE_SEARCH_EXT = new Set(['docx', 'xlsx', 'xlsm', 'xls']);
 
 const MIME = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8',
@@ -96,6 +99,20 @@ function kindOf(name, isDir) {
   if (SHORTCUT_EXT.has(e)) return 'shortcut';
   if (TEXT_EXT.has(e) || /^(dockerfile|makefile|readme|license|\.[a-z]+rc)$/i.test(name)) return 'text';
   return 'other';
+}
+
+function decodeXmlEntities(s) {
+  return String(s || '').replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (m, ent) => {
+    const e = ent.toLowerCase();
+    if (e === 'amp') return '&';
+    if (e === 'lt') return '<';
+    if (e === 'gt') return '>';
+    if (e === 'quot') return '"';
+    if (e === 'apos') return "'";
+    if (e.startsWith('#x')) return String.fromCodePoint(parseInt(e.slice(2), 16) || 0);
+    if (e.startsWith('#')) return String.fromCodePoint(parseInt(e.slice(1), 10) || 0);
+    return m;
+  });
 }
 
 // 把任意请求路径规整成绝对真实路径；非绝对路径回退到 HOME。本机个人工具，不做越权拦截，
@@ -446,7 +463,7 @@ async function grepFiles(query, rootPath) {
   const { truncated: walkTrunc } = await walk(root, {
     limit: 12000,
     deadline: Date.now() + 1800,
-    onFile: (f) => { if (f.kind === 'text' && f.size < 512 * 1024) files.push(f); },
+    onFile: (f) => { if (isContentSearchCandidate(f)) files.push(f); },
   });
   // 按修改时间倒序读，让「我最近写过那句话」的文件优先命中
   files.sort((a, b) => b.mtime - a.mtime);
@@ -456,7 +473,8 @@ async function grepFiles(query, rootPath) {
   for (const f of files) {
     if (Date.now() > deadline || results.length >= 50) { truncated = true; break; }
     let content;
-    try { content = decodeTextPreviewBuffer(await fsp.readFile(f.path)).text; } catch { continue; }
+    try { content = await readSearchableContent(f); } catch { continue; }
+    if (!content) continue;
     const lines = content.split('\n');
     const hits = [];
     for (let i = 0; i < lines.length && hits.length < 4; i++) {
@@ -467,6 +485,60 @@ async function grepFiles(query, rootPath) {
     if (hits.length) results.push({ ...f, hits });
   }
   return { results, truncated };
+}
+
+function isContentSearchCandidate(f) {
+  if (!f || f.isDir) return false;
+  if (f.kind === 'text') return f.size < 512 * 1024;
+  const e = ext(f.name);
+  if (!OFFICE_SEARCH_EXT.has(e)) return false;
+  return f.size < 8 * 1024 * 1024;
+}
+
+async function readSearchableContent(f) {
+  const e = ext(f.name);
+  if (f.kind === 'text') return decodeTextPreviewBuffer(await fsp.readFile(f.path)).text;
+  if (e === 'docx') return extractDocxSearchText(await fsp.readFile(f.path));
+  if (e === 'xlsx' || e === 'xlsm' || e === 'xls') return extractWorkbookSearchText(await fsp.readFile(f.path));
+  return '';
+}
+
+async function extractDocxSearchText(buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const parts = Object.keys(zip.files)
+    .filter((name) => /^word\/(?:document|footnotes|endnotes|comments|header\d+|footer\d+)\.xml$/i.test(name))
+    .sort();
+  const lines = [];
+  for (const name of parts) {
+    const xml = await zip.files[name].async('string');
+    const withBreaks = xml
+      .replace(/<w:(?:p|tr|br|tab)\b[^>]*>/gi, '\n')
+      .replace(/<\/w:(?:p|tr)>/gi, '\n')
+      .replace(/<[^>]+>/g, '');
+    const text = decodeXmlEntities(withBreaks)
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    lines.push(...text);
+  }
+  return lines.join('\n');
+}
+
+function extractWorkbookSearchText(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true, cellNF: false, cellHTML: false, sheetStubs: false });
+  const lines = [];
+  for (const name of wb.SheetNames || []) {
+    const sheet = wb.Sheets[name];
+    if (!sheet || !sheet['!ref']) continue;
+    lines.push(`[${name}]`);
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+    for (const row of rows) {
+      const line = (row || []).map((cell) => String(cell || '').trim()).filter(Boolean).join('\t');
+      if (line) lines.push(line);
+      if (lines.length > 5000) return lines.join('\n');
+    }
+  }
+  return lines.join('\n');
 }
 
 // ---------- Spotlight（mdfind）内容搜索：白嫖系统索引 ----------

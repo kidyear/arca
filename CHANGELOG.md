@@ -11,6 +11,12 @@
 
 ## [Unreleased]
 
+### Added
+- Windows/Linux 的内容搜索回退不再只搜纯文本；小型 `.docx`、`.xlsx/.xlsm/.xls` 会提取正文/单元格文本参与 `/api/content` 搜索，并返回可读命中片段。
+
+### Tests
+- 新增 Office 内容搜索真实 API 回归，临时生成 Word 试题和 Excel 台账，验证中文关键词能搜到对应文件与命中内容。
+
 ## [1.0.94] - 2026-06-18
 
 ### Fixed
