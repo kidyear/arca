@@ -1113,6 +1113,19 @@ async function searchCurrentTree() {
     toast((isContent ? '内容搜索失败：' : '搜索子文件夹失败：') + friendlySearchError(err), true);
   }
 }
+function triggerTopbarContentSearch() {
+  const inp = $('#file-filter');
+  if (!inp) return;
+  const raw = String(inp.value || state.filter || '').trim();
+  inp.value = isContentSearchQuery(raw) ? raw : `内容:${raw}`;
+  const term = contentSearchTerm(inp.value);
+  if (!term) {
+    focusFileFilter();
+    try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+    return;
+  }
+  searchCurrentTree();
+}
 function friendlySearchError(err) {
   const msg = err && err.message ? String(err.message) : String(err || '');
   if (!msg) return '未知错误';
@@ -5062,6 +5075,7 @@ function bindEvents() {
       e.target.blur();
     }
   });
+  $('#file-search-content').onclick = () => triggerTopbarContentSearch();
   $('#file-search-recursive').onclick = () => searchCurrentTree();
   $('#file-filter-clear').onclick = () => { setFileFilter(''); focusFileFilter(); };
   syncFilterUi();

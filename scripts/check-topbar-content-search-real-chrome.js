@@ -180,10 +180,17 @@ async function main() {
         state.entries = [];
         state.visible = [];
         const input = document.querySelector('#file-filter');
-        input.value = '内容:发票合规';
-        await searchCurrentTree();
+        input.value = '发票合规';
+        const contentButton = document.querySelector('#file-search-content');
+        if (!contentButton) throw new Error('content search button missing');
+        contentButton.click();
+        for (let i = 0; i < 80; i += 1) {
+          if (calls.some((x) => x.startsWith('/api/content')) && state.searchMode) break;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
         const value = {
           calls,
+          contentButtonText: contentButton.textContent.trim(),
           searchContentMode: state.searchContentMode,
           searchQuery: state.searchQuery,
           inputValue: input.value,
@@ -199,6 +206,7 @@ async function main() {
     if (result.exceptionDetails) throw new Error(`Chrome topbar content search evaluation failed: ${JSON.stringify(result.exceptionDetails)}`);
     const value = result.result && result.result.value;
     if (!value) throw new Error(`No topbar content search result returned: ${JSON.stringify(result)}`);
+    if (value.contentButtonText !== '文') throw new Error(`content search button text mismatch: ${JSON.stringify(value)}`);
     if (!value.calls.some((x) => x.startsWith('/api/content'))) throw new Error(`topbar content search did not call /api/content: ${JSON.stringify(value)}`);
     if (value.calls.some((x) => x.startsWith('/api/search'))) throw new Error(`topbar content search called /api/search: ${JSON.stringify(value)}`);
     if (!value.searchContentMode || value.searchQuery !== '发票合规') throw new Error(`content search state mismatch: ${JSON.stringify(value)}`);

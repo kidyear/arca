@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
+const index = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'public', 'style.css'), 'utf8');
 const docs = fs.readFileSync(path.join(root, 'docs', '公司版-工作清单.md'), 'utf8');
@@ -29,6 +30,8 @@ function sliceFunction(src, name) {
 }
 
 assertIncludes('state', app, 'searchContentMode: false');
+assertIncludes('topbar has discoverable content search button', index, 'id="file-search-content"');
+assertIncludes('content search button title explains body search', index, '搜索文件正文');
 
 const syncFilterUi = sliceFunction(app, 'syncFilterUi');
 assertIncludes('syncFilterUi keeps content prefix visible', syncFilterUi, "state.searchContentMode ? `内容:${state.searchQuery}` : state.searchQuery");
@@ -43,6 +46,12 @@ assertIncludes('topbar content search uses api content', searchCurrentTree, "'/a
 assertIncludes('topbar filename search still uses api search', searchCurrentTree, "'/api/search?q='");
 assertIncludes('content search entries keep hit metadata', searchCurrentTree, 'content: isContent');
 assertIncludes('search mode stores content flag', searchCurrentTree, 'state.searchContentMode = isContent');
+
+assertIncludes('content search button handler exists', app, 'function triggerTopbarContentSearch');
+const triggerTopbarContentSearch = sliceFunction(app, 'triggerTopbarContentSearch');
+assertIncludes('content search button inserts content prefix', triggerTopbarContentSearch, '内容:');
+assertIncludes('content search button runs tree search', triggerTopbarContentSearch, 'searchCurrentTree()');
+assertIncludes('content search button is wired', app, "$('#file-search-content').onclick = () => triggerTopbarContentSearch();");
 
 const renderStatusbar = sliceFunction(app, 'renderStatusbar');
 assertIncludes('statusbar labels content search', renderStatusbar, '内容搜索');
