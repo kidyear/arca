@@ -410,6 +410,13 @@ kbd {
 .list .row .icon { display: flex; align-items: center; justify-content: center; }
 .list .row .icon .thumb-sm { width: 24px; height: 24px; object-fit: cover; border-radius: 4px; }
 .list .row .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .row .row-name-main { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .row .row-hits { margin-top: 3px; display: grid; gap: 2px; white-space: normal; }
+.list .row .row-hit {
+  color: var(--text-dim); font-size: 11px; line-height: 1.35;
+  overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
+.list .row .row-hit span { color: var(--text-faint); margin-right: 6px; font-family: var(--font-mono); }
 .list .row.renaming { cursor: default; }
 .list .row.renaming .fname { overflow: visible; }
 .list .row .row-dir { color: var(--text-faint); font-size: 11px; }

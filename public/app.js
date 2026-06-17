@@ -207,7 +207,7 @@ const state = {
   sort: localStorage.getItem('fb_sort') || 'name',
   sortDir: localStorage.getItem('fb_sort_dir') || defaultSortDir(localStorage.getItem('fb_sort') || 'name'),
   showHidden: localStorage.getItem('fb_hidden') === '1',
-  filter: '', searchMode: false, searchQuery: '', searchRoot: '', searchTruncated: false, searchBaseEntries: null, selected: null, cursor: -1, cols: 1, visible: [], entryByPath: new Map(), domByPath: new Map(), visibleStats: null, selectionStats: null,
+  filter: '', searchMode: false, searchQuery: '', searchRoot: '', searchTruncated: false, searchContentMode: false, searchBaseEntries: null, selected: null, cursor: -1, cols: 1, visible: [], entryByPath: new Map(), domByPath: new Map(), visibleStats: null, selectionStats: null,
   renderSeq: 0, // 大目录分片渲染的取消令牌：新渲染开始后旧批次自动失效
   paintedSelected: new Set(), paintedCursor: -1, // 选择/光标增量刷 class，方向键移动不再扫全列表
   paintedCut: new Set(), // Ctrl+X 后给源文件打淡化标记，像资源管理器一样提醒“正在剪切”
@@ -1039,7 +1039,7 @@ function syncFilterUi(force = false) {
   const clear = $('#file-filter-clear');
   const recursive = $('#file-search-recursive');
   if (!inp || !clear) return;
-  if (force || document.activeElement !== inp) inp.value = state.searchMode ? state.searchQuery : (state.filter || '');
+  if (force || document.activeElement !== inp) inp.value = state.searchMode ? (state.searchContentMode ? `内容:${state.searchQuery}` : state.searchQuery) : (state.filter || '');
   clear.classList.toggle('show', !!state.filter || !!state.searchMode);
   if (recursive) recursive.classList.toggle('active', !!state.searchMode);
 }
@@ -1061,6 +1061,7 @@ function exitSearchMode(render = true) {
   state.searchQuery = '';
   state.searchRoot = '';
   state.searchTruncated = false;
+  state.searchContentMode = false;
   state.searchBaseEntries = null;
   if (render) {
     syncFilterUi(true);
@@ -1068,9 +1069,17 @@ function exitSearchMode(render = true) {
   }
   return true;
 }
+function isContentSearchQuery(q) {
+  return /^(内容[:：]|content:)/i.test(String(q || '').trim());
+}
+function contentSearchTerm(q) {
+  return String(q || '').replace(/^(内容[:：]|content:)/i, '').trim();
+}
 async function searchCurrentTree() {
   if (!state.cwd || state.skillsMode || state.virtualMode) return;
-  const term = String($('#file-filter')?.value || state.filter || '').trim();
+  const rawTerm = String($('#file-filter')?.value || state.filter || '').trim();
+  const isContent = isContentSearchQuery(rawTerm);
+  const term = isContent ? contentSearchTerm(rawTerm) : rawTerm;
   if (!term) { focusFileFilter(); return; }
   const root = state.cwd;
   state.filter = '';
@@ -1080,27 +1089,28 @@ async function searchCurrentTree() {
   state.selectionAnchor = null;
   state.cursor = -1;
   state.typeAhead = { text: '', ts: 0 };
-  $('#file-area').innerHTML = `<div class="cmdk-loading">搜索子文件夹「${escapeHtml(term)}」…</div>`;
+  $('#file-area').innerHTML = `<div class="cmdk-loading">${isContent ? '内容搜索' : '搜索子文件夹'}「${escapeHtml(term)}」…</div>`;
   try {
-    const data = await api('/api/search?q=' + encodeURIComponent(term) + '&root=' + encodeURIComponent(root));
+    const data = await api((isContent ? '/api/content?q=' : '/api/search?q=') + encodeURIComponent(term) + '&root=' + encodeURIComponent(root));
     state.searchMode = true;
     state.searchQuery = term;
     state.searchRoot = root;
     state.searchTruncated = !!data.truncated;
+    state.searchContentMode = isContent;
     state.recentMode = false;
     state.skillsMode = false;
     state.virtualMode = null;
-    state.entries = prepareEntries((data.results || []).map((e) => ({ ...e, hidden: false })));
+    state.entries = prepareEntries((data.results || []).map((e) => ({ ...e, hidden: false, content: isContent ? true : !!e.content })));
     state.sort = 'mtime';
     state.sortDir = 'desc';
     syncSortControls();
     syncFilterUi(true);
     renderFiles();
-    toast(`已搜索子文件夹：${term}`);
+    toast(isContent ? `已内容搜索：${term}` : `已搜索子文件夹：${term}`);
   } catch (err) {
-    $('#file-filter').value = term;
+    $('#file-filter').value = rawTerm;
     renderSearchFailure(term, root, err);
-    toast('搜索子文件夹失败：' + friendlySearchError(err), true);
+    toast((isContent ? '内容搜索失败：' : '搜索子文件夹失败：') + friendlySearchError(err), true);
   }
 }
 function friendlySearchError(err) {
@@ -1208,7 +1218,8 @@ function renderStatusbar() {
     : totalText;
   if (state.searchMode) {
     const rootText = state.searchRoot ? ` · ${escapeHtml(tilde(state.searchRoot))}` : '';
-    selectedText = `<b class="sb-selected">搜索「${escapeHtml(state.searchQuery)}」</b>${rootText}<span class="sb-total"> · ${selectedText}</span>`;
+    const label = state.searchContentMode ? '内容搜索' : '搜索';
+    selectedText = `<b class="sb-selected">${label}「${escapeHtml(state.searchQuery)}」</b>${rootText}<span class="sb-total"> · ${selectedText}</span>`;
   }
   sb.classList.remove('hidden');
   sb.innerHTML = `<span class="sb-summary">${selectedText}</span><span class="sb-links">${state.searchMode ? '<a id="sb-clear-search" title="清空搜索结果并回到原目录列表">清空搜索</a>' : ''}${state.project ? '<a id="sb-rel" title="版本号→CHANGELOG→打包→push→Release 一条龙，在终端跑">发版</a>' : ''}<a id="sb-mem" title="这个文件夹里 AI 干过什么：历史会话、改过的文件、一键续上">项目记忆</a><a id="sb-du" title="算上子目录的真实磁盘占用">占用透视</a></span>`;
@@ -1461,6 +1472,14 @@ function fileItemTitle(e, changed) {
   if (!e.isDir && Number.isFinite(e.size)) lines.push(fmtSize(e.size));
   return lines.filter(Boolean).join('\n');
 }
+function rowHitHtml(e) {
+  if (!e || !e.content || !Array.isArray(e.hits) || !e.hits.length) return '';
+  const lines = e.hits.slice(0, 2).map((h) => {
+    const label = Number.isFinite(Number(h.line)) ? `L${Number(h.line)}` : '命中';
+    return `<div class="row-hit"><span>${label}</span>${escapeHtml(String(h.text || '').slice(0, 220))}</div>`;
+  });
+  return `<div class="row-hits">${lines.join('')}</div>`;
+}
 function gridItem(e, i) {
   const el = document.createElement('div');
   const chg = state.changed && state.changed.get(e.path);
@@ -1483,9 +1502,10 @@ function listRow(e, i) {
   if (chgR) { el.dataset.changed = chgR.count > 1 ? '改·' + chgR.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chgR.count * 0.12).toFixed(2)); }
   // 最近修改/搜索结果是跨目录列表，名称后缀显示来源目录，方便区分同名文件
   const dirHint = (state.recentMode || state.searchMode) ? ` <span class="row-dir">· ${escapeHtml(tilde(e.dir || dirOf(e.path)))}</span>` : '';
+  const hitsHtml = rowHitHtml(e);
   const thumbSrc = `/api/thumb?path=${encodeURIComponent(e.path)}&w=96&v=${e.mtime || 0}`;
   el.innerHTML = `<div class="icon">${(e.kind === 'image' || e.kind === 'video') ? `<img class="thumb-sm js-lazy-thumb" loading="lazy" decoding="async" src="${THUMB_PLACEHOLDER}" data-src="${escapeHtml(thumbSrc)}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'svg-icon',innerHTML:this.dataset.fb||''}))" data-fb='${escapeHtml(iconSvg(e, 18))}'>` : `<span class="svg-icon">${iconSvg(e, 18)}</span>`}</div>
-    <div class="fname">${escapeHtml(e.name)}${projBadge(e)}${dirHint}</div>
+    <div class="fname"><span class="row-name-main">${escapeHtml(e.name)}${projBadge(e)}${dirHint}</span>${hitsHtml}</div>
     <div class="meta">${fmtTime(e.mtime)}</div>
     <div class="meta">${fmtTime(e.btime)}</div>
     <div class="meta type-meta">${kindLabel(e)}</div>
