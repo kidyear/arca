@@ -273,7 +273,10 @@ module.exports = function createAI(ctx) {
 
   function shouldEnableDocxTools(text, attachments) {
     if ((attachments || []).some((a) => /\.docx$/i.test(String(a || '')))) return true;
-    return /(?:\.docx\b|Word|文档审阅|审阅|批注|修订|合同审阅|规范检查)/i.test(String(text || ''));
+    const s = String(text || '');
+    const reviewIntent = /(?:文档审阅|审阅|批注|修订|合同审阅|规范检查|规范|检查)/i.test(s);
+    const wordTarget = /(?:\.docx\b|Word|docx|文档|合同)/i.test(s);
+    return reviewIntent && wordTarget;
   }
 
   function requiresAgentForLocalDocument(text) {
@@ -292,7 +295,7 @@ module.exports = function createAI(ctx) {
     if (requiresAgentForLocalDocument(s)) return false;
     if (chat.sessionId) return false;
     if (!s || s.length > 240 || /```/.test(s)) return false;
-    return !/(文件|文件夹|目录|路径|当前|这里|这个|附件|读取|搜索|查找|打开|修改|改名|重命名|删除|复制|移动|粘贴|整理|运行|执行|命令|终端|代码库|项目|生成文件|保存|写入|表格|Excel|Word|docx|xlsx)/i.test(s);
+    return !/(文件|文件夹|目录|路径|当前|这里|这个|附件|读取|搜索|查找|打开|修改|改名|重命名|删除|复制|移动|粘贴|整理|运行|执行|命令|终端|代码库|项目|生成文件|保存|写入|表格|Excel|xlsx)/i.test(s);
   }
 
   function approvalDecision(mode, toolName, input) {
