@@ -1100,11 +1100,12 @@ body { transition: background-color 0.28s ease, color 0.28s ease; }
 .item.live-edit { animation: liveZap 0.5s ease; }
 @keyframes liveZap { 0% { transform: scale(1); } 28% { transform: scale(1.055); } 100% { transform: scale(1); } }
 .row.live-edit { animation: liveZapRow 0.5s ease; }
-@keyframes liveZapRow { 0% { background: transparent; } 28% { background: var(--accent-soft); } 100% { background: transparent; } }
+@keyframes liveZapRow { 0% { background: transparent; } 28% { background: color-mix(in srgb, var(--text-faint) 10%, transparent); } 100% { background: transparent; } }
+.item.live-edit:not(.selected), .row.live-edit:not(.selected) { border-color: transparent; outline: none; box-shadow: none; }
 /* 写入涟漪：从图标中心荡开一圈 */
 .edit-ripple {
   position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
-  border-radius: 50%; border: 2px solid var(--accent); pointer-events: none; z-index: 4;
+  border-radius: 50%; border: 2px solid var(--text-faint); pointer-events: none; z-index: 4;
   animation: editRipple 0.7s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
 }
 @keyframes editRipple { 0% { transform: scale(0.5); opacity: 0.85; } 100% { transform: scale(7); opacity: 0; } }
