@@ -19,6 +19,11 @@ assertIncludes('docx system open button', app, 'id="docx-sys"');
 assertIncludes('compact office header css', css, '.office-body');
 assertIncludes('compact docx editor bar css', css, '.docx-save-bar');
 assertIncludes('compact docx host css', css, '.docx-host');
+assertIncludes('office body keeps more room for content', css, '.office-body { padding: 4px 6px 6px; gap: 4px; }');
+assertIncludes('office editor bar has compact min height', css, 'min-height: 28px; max-height: 28px;');
+assertIncludes('office editor bar has no extra vertical padding', css, 'padding: 0;');
+assertIncludes('office buttons use compact padding', css, '.office-body .editor-bar button { padding: 3px 9px;');
+assertIncludes('office hint does not force tall toolbar', css, '.office-body .editor-hint { line-height: 1.2;');
 
 assertIncludes('safe xlsx html helper', xlsxEntry, 'function safeSheetToHtml');
 assertIncludes('empty xlsx sheet handling', xlsxEntry, "if (!sheet || !sheet['!ref'])");

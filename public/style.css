@@ -579,9 +579,9 @@ kbd {
 .preview-foot { display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-faint); background: var(--bg-2); }
 .preview-foot:empty { display: none; }
 .preview-body { flex: 1; overflow: auto; padding: 16px; }
-.office-body { padding: 8px 10px 10px; gap: 6px; }
+.office-body { padding: 4px 6px 6px; gap: 4px; }
 .office-body .editor-bar {
-  min-height: 30px;
+  min-height: 28px; max-height: 28px;
   padding: 0;
   margin: 0;
   border: 0;
@@ -589,11 +589,13 @@ kbd {
 }
 .docx-body .editor-bar { flex: 0 0 auto; gap: 8px; }
 .docx-save-bar { min-height: 28px; }
+.office-body .editor-bar button { padding: 3px 9px; min-height: 26px; line-height: 1.2; }
 .docx-save-bar .primary,
 .docx-save-bar .ghost-btn {
   min-height: 28px;
-  padding: 4px 12px;
+  padding: 3px 9px;
 }
+.office-body .editor-hint { line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .docx-save-bar .editor-hint {
   margin-left: auto;
   font-size: 11px;
