@@ -276,10 +276,20 @@ module.exports = function createAI(ctx) {
     return /(?:\.docx\b|Word|文档审阅|审阅|批注|修订|合同审阅|规范检查)/i.test(String(text || ''));
   }
 
+  function requiresAgentForLocalDocument(text) {
+    const s = String(text || '').trim();
+    if (!s) return false;
+    const doc = /(?:文档|文件|word|docx|打印版|可打印)/i.test(s);
+    const localAction = /(?:本地|生成|创建|新建|整理成|做成|导出|保存|写入|打印|可打印|落盘)/i.test(s);
+    if (!doc || !localAction) return false;
+    return /(?:本地生成|生成.*(?:文档|文件|word|docx|打印版|可打印)|(?:文档|文件|word|docx|打印版|可打印).*生成|整理成.*(?:文档|word|docx|打印版|可打印)|做成.*(?:文档|word|docx|打印版|可打印)|导出.*(?:文档|word|docx)|保存.*(?:文档|文件|word|docx)|写入.*(?:文档|文件|word|docx)|打印.*(?:文档|文件|word|docx)|可打印)/i.test(s);
+  }
+
   function shouldUseDirectChat(prov, chat, text, attachments) {
     const s = String(text || '').trim();
     if (prov.key === 'claude' || !prov.baseUrl || !prov.apiKey) return false;
     if ((attachments || []).length || shouldEnableDocxTools(s, attachments)) return false;
+    if (requiresAgentForLocalDocument(s)) return false;
     if (chat.sessionId) return false;
     if (!s || s.length > 240 || /```/.test(s)) return false;
     return !/(文件|文件夹|目录|路径|当前|这里|这个|附件|读取|搜索|查找|打开|修改|改名|重命名|删除|复制|移动|粘贴|整理|运行|执行|命令|终端|代码库|项目|生成文件|保存|写入|表格|Excel|Word|docx|xlsx)/i.test(s);
