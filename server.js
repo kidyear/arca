@@ -15,7 +15,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { exec, spawn, execFile } = require('child_process');
 const { URL } = require('url');
-const { decodeTextPreviewBuffer } = require('./lib/text-preview-decoder');
+const { decodeTextPreviewBuffer, encodeTextPreviewBuffer } = require('./lib/text-preview-decoder');
 
 const HOME = os.homedir();
 const PORT = Number(process.env.FANBOX_PORT) || 4567;
@@ -538,7 +538,7 @@ async function recentFiles(rootPath) {
 // ---------- 文件操作（编辑 / 废纸篓 / 重命名 / 新建）----------
 // 都带护栏：编辑只认文本类、删除走系统废纸篓可恢复、名称拒绝路径分隔符与空字节。
 
-async function writeTextFile(p, content, expectedMtime) {
+async function writeTextFile(p, content, expectedMtime, encoding) {
   const file = resolvePath(p);
   if (!TEXT_EXT.has(ext(file))) throw new Error('只支持文本类文件编辑');
   if (typeof content !== 'string') throw new Error('内容非法');
@@ -554,14 +554,14 @@ async function writeTextFile(p, content, expectedMtime) {
   const tmp = `${file}.fanbox-tmp-${process.pid}-${Date.now()}`;
   try {
     const fh = await fsp.open(tmp, 'w');
-    try { await fh.writeFile(content, 'utf8'); await fh.sync(); } finally { await fh.close(); }
+    try { await fh.writeFile(encodeTextPreviewBuffer(content, encoding)); await fh.sync(); } finally { await fh.close(); }
     await fsp.rename(tmp, file);
   } catch (e) {
     await fsp.unlink(tmp).catch(() => {}); // 失败清理临时文件，不留残骸
     throw e;
   }
   const st = await fsp.stat(file);
-  return { ok: true, size: st.size, mtime: st.mtimeMs };
+  return { ok: true, size: st.size, mtime: st.mtimeMs, encoding: String(encoding || 'utf-8').toLowerCase() };
 }
 
 // 移到系统废纸篓（可恢复），而非永久删除——呼应「不删除只归档」
@@ -2562,7 +2562,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/write' && req.method === 'POST') {
       const b = await readBody(req);
-      try { return sendJSON(res, 200, await writeTextFile(b.path, b.content, b.expectedMtime)); }
+      try { return sendJSON(res, 200, await writeTextFile(b.path, b.content, b.expectedMtime, b.encoding)); }
       catch (e) { return sendJSON(res, 200, { ok: false, conflict: !!e.conflict, error: e.message }); }
     }
     if (p === '/api/archive') {

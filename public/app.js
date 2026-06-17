@@ -3308,7 +3308,7 @@ async function enterEditMode(e) {
   };
   const save = async (force) => {
     const content = getValue();
-    const r = await apiPost('/api/write', { path: e.path, content, expectedMtime: force ? 0 : baseMtime });
+    const r = await apiPost('/api/write', { path: e.path, content, expectedMtime: force ? 0 : baseMtime, encoding: data.encoding });
     if (r.conflict) {
       const ok = await confirmDialog('文件已被外部修改（可能是 agent 改的）。覆盖会丢掉外部改动，确定覆盖？');
       if (ok) return save(true);
@@ -3373,7 +3373,7 @@ async function mdEditor(e, data, mode = 'rich') {
     const content = getValue();
     if (content === baseline) return;
     setStatus('保存中…');
-    const r = await apiPost('/api/write', { path: e.path, content, expectedMtime: force ? 0 : baseMtime });
+    const r = await apiPost('/api/write', { path: e.path, content, expectedMtime: force ? 0 : baseMtime, encoding: data.encoding });
     if (r.conflict) {
       paused = true;
       const ok = await confirmDialog('文件已被外部修改（可能是 agent 改的）。覆盖会丢掉外部改动，确定覆盖？');

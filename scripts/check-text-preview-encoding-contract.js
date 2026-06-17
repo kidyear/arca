@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const { decodeTextPreviewBuffer } = require('../lib/text-preview-decoder');
+const { decodeTextPreviewBuffer, encodeTextPreviewBuffer } = require('../lib/text-preview-decoder');
 const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
 const docs = fs.readFileSync(path.join(root, 'docs', '公司版-工作清单.md'), 'utf8');
@@ -18,17 +18,24 @@ const gbk = decodeTextPreviewBuffer(gbkBytes);
 assert.strictEqual(gbk.encoding, 'gbk');
 assert.strictEqual(gbk.text, '该参考设计版本');
 assert(!gbk.text.includes('\uFFFD'), 'GBK text should not contain replacement characters');
+const reencodedGbk = decodeTextPreviewBuffer(encodeTextPreviewBuffer(`${gbk.text}\n新增一行`, gbk.encoding));
+assert.strictEqual(reencodedGbk.encoding, 'gbk');
+assert(reencodedGbk.text.includes('新增一行'), 'GBK save should preserve added Chinese text');
 
 const utf8 = decodeTextPreviewBuffer(Buffer.from('该参考设计版本', 'utf8'));
 assert.strictEqual(utf8.encoding, 'utf-8');
 assert.strictEqual(utf8.text, '该参考设计版本');
 
-assert(server.includes("const { decodeTextPreviewBuffer } = require('./lib/text-preview-decoder');"));
+assert(server.includes("const { decodeTextPreviewBuffer, encodeTextPreviewBuffer } = require('./lib/text-preview-decoder');"));
 assert(server.includes('decodeTextPreviewBuffer(buf.subarray(0, end))'));
 assert(server.includes('decodeTextPreviewBuffer(await fsp.readFile(file))'));
+assert(server.includes('encodeTextPreviewBuffer(content, encoding)'));
+assert(server.includes('await writeTextFile(b.path, b.content, b.expectedMtime, b.encoding)'));
 assert(app.includes("data.encoding ? `<span>${escapeHtml(data.encoding.toUpperCase())}</span>` : ''"));
+assert(app.includes('encoding: data.encoding'));
 assert(docs.includes('文本预览 GBK/ANSI 自动识别'));
 assert(fs.existsSync(realApiScript), 'real /api/read encoding regression script should exist');
 assert(docs.includes('check-text-preview-encoding-real-api.js'));
+assert(docs.includes('check-text-save-preserves-encoding-api.js'));
 
 console.log('text-preview-encoding contract ok');

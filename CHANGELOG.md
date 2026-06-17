@@ -11,6 +11,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- 文本编辑保存会沿用 `/api/read` 检测到的原始编码；GBK/ANSI 工程说明文件编辑后仍按 GBK 写回，不再悄悄转成 UTF-8。
+
 ### Tests
 - 文本预览新增真实工程文件回归，直接验证 `重要说明.txt` 这类 GBK/ANSI 老 Windows 说明文件通过 `/api/read` 和真实 Chrome 预览 UI 返回/显示可读中文且不含乱码。
 
