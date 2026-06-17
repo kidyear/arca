@@ -1463,7 +1463,7 @@ function fileItemTitle(e, changed) {
 }
 function gridItem(e, i) {
   const el = document.createElement('div');
-  const chg = state.changed && state.changed.get(e.name);
+  const chg = state.changed && state.changed.get(e.path);
   el.className = 'item' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (isSelectedPath(e.path) ? ' selected' : '') + (isCutPath(e.path) ? ' cutting' : '') + (chg ? ' changed' : '');
   el.dataset.idx = i;
   el.dataset.path = e.path;
@@ -1475,7 +1475,7 @@ function gridItem(e, i) {
 }
 function listRow(e, i) {
   const el = document.createElement('div');
-  const chgR = state.changed && state.changed.get(e.name);
+  const chgR = state.changed && state.changed.get(e.path);
   el.className = 'row' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (isSelectedPath(e.path) ? ' selected' : '') + (isCutPath(e.path) ? ' cutting' : '') + (chgR ? ' changed' : '');
   el.dataset.idx = i;
   el.dataset.path = e.path;
@@ -6469,7 +6469,7 @@ if (window.fanboxPty) {
 // 文件变化 → 自动刷新列表（看着 agent 干活）；编辑中不动预览，避免吞掉未保存内容
 if (window.fanboxFs) {
   let rt = null;
-  state.changed = new Map(); // 顶层名 → { count, files:Set, ts }
+  state.changed = new Map(); // 当前目录可见项完整路径 → { count, files:Set, ts }
   let sweep = null;
   const scheduleSweep = () => {
     if (sweep) return;
@@ -6491,8 +6491,9 @@ if (window.fanboxFs) {
     if (filename) {
       const sub = String(filename);
       const top = sub.split('/')[0];
-      let rec = state.changed.get(top);
-      if (!rec) { rec = { count: 0, files: new Set(), ts: 0 }; state.changed.set(top, rec); }
+      const changedPath = state.cwd.replace(/\/$/, '') + state.sep + top;
+      let rec = state.changed.get(changedPath);
+      if (!rec) { rec = { count: 0, files: new Set(), ts: 0 }; state.changed.set(changedPath, rec); }
       rec.count++; rec.ts = Date.now();
       if (rec.files.size < 8 && sub !== top) rec.files.add(sub);
       scheduleSweep();
