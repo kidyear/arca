@@ -456,7 +456,7 @@ async function grepFiles(query, rootPath) {
   for (const f of files) {
     if (Date.now() > deadline || results.length >= 50) { truncated = true; break; }
     let content;
-    try { content = await fsp.readFile(f.path, 'utf8'); } catch { continue; }
+    try { content = decodeTextPreviewBuffer(await fsp.readFile(f.path)).text; } catch { continue; }
     const lines = content.split('\n');
     const hits = [];
     for (let i = 0; i < lines.length && hits.length < 4; i++) {
@@ -512,7 +512,7 @@ async function contentSearch(query, rootPath) {
     if (read >= 12) break;
     if (r.kind !== 'text' || r.size > 512 * 1024) continue;
     read++;
-    let content; try { content = await fsp.readFile(r.path, 'utf8'); } catch { continue; }
+    let content; try { content = decodeTextPreviewBuffer(await fsp.readFile(r.path)).text; } catch { continue; }
     const lines = content.split('\n');
     const hits = [];
     for (let i = 0; i < lines.length && hits.length < 3; i++) {
