@@ -7216,6 +7216,7 @@ const chat = {
   chats: [],
   attachments: [],
   busy: false,
+  followOutput: true,
   providerReady: true,
   providerMissingKeyLabel: '',
   providerUnavailableLabel: '',
@@ -7237,7 +7238,38 @@ const chat = {
     const openAndChat = !panel.classList.contains('hidden') && panel.classList.contains('chat-mode');
     if (openAndChat) term.close(); else this.open();
   },
-  scroll() { const m = $('#chat-msgs'); m.scrollTop = m.scrollHeight; },
+  isNearBottom() {
+    const m = $('#chat-msgs');
+    if (!m) return true;
+    return m.scrollHeight - m.scrollTop - m.clientHeight < 56;
+  },
+  setJumpVisible(show) {
+    const b = $('#chat-jump-bottom');
+    if (!b) return;
+    b.classList.toggle('hidden', !show);
+  },
+  scroll(force = false) {
+    const m = $('#chat-msgs');
+    if (!m) return;
+    if (force || this.followOutput !== false) {
+      m.scrollTop = m.scrollHeight;
+      this.followOutput = true;
+      this.setJumpVisible(false);
+    } else {
+      this.setJumpVisible(true);
+    }
+  },
+  initScrollFollow() {
+    const m = $('#chat-msgs');
+    const b = $('#chat-jump-bottom');
+    if (!m || !b || m.dataset.scrollFollowReady === '1') return;
+    m.dataset.scrollFollowReady = '1';
+    m.addEventListener('scroll', () => {
+      this.followOutput = this.isNearBottom();
+      if (this.followOutput) this.setJumpVisible(false);
+    });
+    b.onclick = () => this.scroll(true);
+  },
   msgEl(cls) {
     const empty = $('#chat-empty'); if (empty) empty.classList.add('hidden');
     const d = document.createElement('div');
@@ -7336,6 +7368,8 @@ const chat = {
   // 多会话可并行：切换不受别的会话运行影响，发送/停止按钮只反映「当前这个会话」的状态
   async openChat(id) {
     this.currentChat = id;
+    this.followOutput = true;
+    this.setJumpVisible(false);
     this.renderChatList();
     this.updateComposer();
     tpl.clear();
@@ -7385,6 +7419,8 @@ const chat = {
   },
   newChat() {
     this.currentChat = null;
+    this.followOutput = true;
+    this.setJumpVisible(false);
     this.renderChatList();
     this.updateComposer();
     $('#chat-msgs').innerHTML = '<div class="chat-empty"><p>新对话。这次对话会绑定当前浏览的目录：' + escapeHtml(tilde(state.cwd || '~')) + '</p></div>';
@@ -7518,6 +7554,8 @@ const chat = {
     tpl.clear(); // 发送时收起模板区
     const payload = { chatId: this.currentChat, text, title: (displayText || text).slice(0, 40), attachments: this.attachments.slice(), cwd: state.cwd };
     let busyKey = this.currentChat || '__new__'; // 新会话先用占位 key，拿到正式 id 后置换
+    this.followOutput = true;
+    this.setJumpVisible(false);
     // 用户气泡（附件名一并显示）
     const u = this.msgEl('user');
     u.textContent = displayText || text;
@@ -7772,6 +7810,7 @@ const chat = {
     $('#chat-tpl').onclick = () => this.newChat(); // 模板挂在新对话的空状态里
     $('#chat-settings').onclick = () => aiSettings.open();
     this.initSideResize();
+    this.initScrollFollow();
     const input = $('#chat-input');
     input.addEventListener('input', () => this.updateComposer());
     input.addEventListener('keydown', (e) => {
