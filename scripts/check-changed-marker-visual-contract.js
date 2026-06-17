@@ -25,4 +25,17 @@ if (!/\.item\.changed:not\(\.selected\),\s*\.row\.changed:not\(\.selected\)/.tes
   throw new Error('changed marker needs a non-selected visual rule');
 }
 
+if (!css.includes('.item.changed:not(.selected), .row.changed:not(.selected) { background: transparent !important; border-color: transparent !important; outline: none !important; box-shadow: none !important; }')) {
+  throw new Error('changed marker must be badge-only on unselected entries, not a second card selection');
+}
+
+const changedBadgeBlocks = [...css.matchAll(/\.item\.changed::after,\s*\.row\.changed::after\s*\{[^}]*\}/g)].map((m) => m[0]);
+if (!changedBadgeBlocks.length) throw new Error('changed marker badge block is missing');
+
+for (const block of changedBadgeBlocks) {
+  if (/background:\s*var\(--accent\)/.test(block) || /border[^;}]*var\(--accent\)/.test(block) || /color[^;}]*var\(--accent\)/.test(block)) {
+    throw new Error('changed marker badge must not use accent orange; users read accent as selected');
+  }
+}
+
 console.log('changed-marker-visual contract ok');

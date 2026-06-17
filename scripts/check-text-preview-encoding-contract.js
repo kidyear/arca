@@ -9,6 +9,7 @@ const { decodeTextPreviewBuffer } = require('../lib/text-preview-decoder');
 const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
 const docs = fs.readFileSync(path.join(root, 'docs', '公司版-工作清单.md'), 'utf8');
+const realApiScript = path.join(root, 'scripts', 'check-text-preview-encoding-real-api.js');
 
 const gbkBytes = Buffer.from([
   0xB8, 0xC3, 0xB2, 0xCE, 0xBF, 0xBC, 0xC9, 0xE8, 0xBC, 0xC6, 0xB0, 0xE6, 0xB1, 0xBE,
@@ -27,5 +28,7 @@ assert(server.includes('decodeTextPreviewBuffer(buf.subarray(0, end))'));
 assert(server.includes('decodeTextPreviewBuffer(await fsp.readFile(file))'));
 assert(app.includes("data.encoding ? `<span>${escapeHtml(data.encoding.toUpperCase())}</span>` : ''"));
 assert(docs.includes('文本预览 GBK/ANSI 自动识别'));
+assert(fs.existsSync(realApiScript), 'real /api/read encoding regression script should exist');
+assert(docs.includes('check-text-preview-encoding-real-api.js'));
 
 console.log('text-preview-encoding contract ok');

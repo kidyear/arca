@@ -19,10 +19,28 @@ function sliceFunction(src, name) {
 }
 
 const revealEntryInCurrentApp = sliceFunction(app, 'revealEntryInCurrentApp');
+const openRecent = sliceFunction(app, 'openRecent');
+assertIncludes('openRecent opens parent directory', openRecent, 'await navigate(dirOf(p))');
+assertIncludes('openRecent reports navigation failure', openRecent, "toast('打开最近文件失败：' + friendlyOpenLocationError(err), true);");
+assertIncludes('openRecent awaits recent folder target navigation', openRecent, 'await navigate(p);');
+assertIncludes('openRecent reports recent folder target failure', openRecent, "toast('打开最近文件夹失败：' + friendlyOpenLocationError(err), true);");
+if (/navigate\(dirOf\(p\)\)\.catch\(\(\) => \{\}\)/.test(openRecent)) {
+  throw new Error('openRecent must not swallow parent directory navigation errors');
+}
+if (/if \(e\.isDir\) \{\s*navigate\(p\);\s*return;\s*\}/.test(openRecent)) {
+  throw new Error('openRecent must await and report recent folder navigation errors');
+}
+
 assertIncludes('revealEntryInCurrentApp', revealEntryInCurrentApp, 'const targetDir = dirOf(e.path)');
 assertIncludes('revealEntryInCurrentApp', revealEntryInCurrentApp, 'await navigate(targetDir)');
+assertIncludes('revealEntryInCurrentApp reports navigation failure', revealEntryInCurrentApp, "toast('打开所在位置失败：' + friendlyOpenLocationError(err), true);");
 assertIncludes('revealEntryInCurrentApp', revealEntryInCurrentApp, 'selectVisiblePaths([e.path])');
 assertIncludes('revealEntryInCurrentApp', revealEntryInCurrentApp, '已打开所在位置');
+assertIncludes('friendly location error helper exists', app, 'function friendlyOpenLocationError(err)');
+
+if (/navigate\(targetDir\)\.catch\(\(\) => \{\}\)/.test(revealEntryInCurrentApp)) {
+  throw new Error('revealEntryInCurrentApp must not swallow parent directory navigation errors');
+}
 
 const showContextMenu = sliceFunction(app, 'showContextMenu');
 assertIncludes('showContextMenu', showContextMenu, 'state.searchMode || state.recentMode');

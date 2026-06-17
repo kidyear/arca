@@ -300,19 +300,20 @@ module.exports = function createAI(ctx) {
 
   function priorChatContextForAgent(chat) {
     const msgs = (chat.messages || [])
-      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.text)
+      .filter((m) => (((m.role === 'user' || m.role === 'assistant') && m.text) || (m.role === 'tool' && (m.detail || m.name))))
       .slice(-12);
     if (!msgs.length) return '';
     let budget = 18000;
     const lines = [];
     for (let i = msgs.length - 1; i >= 0; i -= 1) {
       const m = msgs[i];
-      const label = m.role === 'assistant' ? '助手' : '用户';
-      let text = String(m.text || '').trim();
+      const label = m.role === 'tool' ? '工具' : (m.role === 'assistant' ? '助手' : '用户');
+      let text = m.role === 'tool' ? `${m.name || 'tool'}：${m.detail || ''}` : String(m.text || '').trim();
       if (!text) continue;
       const max = Math.min(budget, m.role === 'assistant' ? 8000 : 3000);
       if (text.length > max) text = text.slice(0, max) + '\n...（该条前文过长，已截断）';
-      const line = `${label}：${text}`;
+      const att = Array.isArray(m.attachments) && m.attachments.length ? `\n附件路径：${m.attachments.join('\n')}` : '';
+      const line = `${label}：${text}${att}`;
       lines.unshift(line);
       budget -= line.length;
       if (budget <= 0) break;
@@ -323,6 +324,63 @@ module.exports = function createAI(ctx) {
       '如果用户说“上面/刚才/这个/生成文档/整理成 Word”等指代，默认指向最近一轮助手已经产出的内容。',
       '',
       lines.join('\n\n'),
+    ].join('\n');
+  }
+
+  function recentPathContextForAgent(chat) {
+    const msgs = Array.isArray(chat.messages) ? chat.messages : [];
+    const seen = new Set();
+    const paths = [];
+    const fileExtRe = /\.(?:docx?|xlsx?|pptx?|pdf|txt|md|markdown|csv|tsv|html?|png|jpe?g|gif|webp|svg|avif|zip|rar|7z|tar\.gz|tar|tgz|gz|bz2|xz|jsonl?|xml|ya?ml|toml|log)\b/i;
+    const trimPath = (p) => {
+      let s = String(p || '').trim().replace(/^["']|["']$/g, '').replace(/[)\]}>，。；;：:,、]+$/u, '');
+      const fileHit = fileExtRe.exec(s);
+      if (fileHit) s = s.slice(0, fileHit.index + fileHit[0].length);
+      else s = s.replace(/\s+(?:已生成|已保存|已完成|生成完成|保存完成|可直接|请检查|请打开|请查看|请确认|可以打开|已经生成|已经保存).*$/u, '');
+      return s;
+    };
+    const isAbsoluteishPath = (p) => /^(?:file:\/\/|[A-Za-z]:[\\/]|\\\\|[.][\\/])/i.test(String(p || '').trim());
+    const joinCwdPath = (base, rel) => {
+      const cwd = String(base || '').trim();
+      const child = String(rel || '').trim().replace(/^["']|["']$/g, '');
+      if (!cwd || !child || isAbsoluteishPath(child)) return child;
+      const sep = cwd.includes('\\') ? '\\' : '/';
+      return cwd.replace(/[\\/]+$/g, '') + sep + child.replace(/^[\\/]+/g, '');
+    };
+    const collectRelativeToolPath = (m) => {
+      const detail = trimPath(m && m.detail);
+      if (!detail || isAbsoluteishPath(detail)) return;
+      if (!fileExtRe.test(detail) && !/[\\/]/.test(detail)) return;
+      addPath(joinCwdPath(chat.cwd, detail));
+    };
+    const addPath = (p) => {
+      const clean = trimPath(p);
+      if (!clean) return;
+      const key = clean.toLocaleLowerCase('zh');
+      if (seen.has(key)) return;
+      seen.add(key);
+      paths.push(clean);
+    };
+    const collectPaths = (value) => {
+      if (!value) return;
+      if (Array.isArray(value)) { value.forEach((x) => collectPaths(x)); return; }
+      const text = String(value || '');
+      const pathRe = /(?:file:\/\/[^\s\r\n<>"'`|，。；;：:,、]+|[A-Za-z]:[\\/][^\r\n<>"'`|，。；;：:,、]+|\\\\[^\r\n<>"'`|，。；;：:,、]+|[.][\\/][^\s\r\n<>"'`|，。；;：:,、]+)/gi;
+      let m;
+      while ((m = pathRe.exec(text))) addPath(m[0]);
+    };
+    for (let i = msgs.length - 1; i >= 0 && paths.length < 8; i -= 1) {
+      const m = msgs[i] || {};
+      collectPaths(m.attachments);
+      collectPaths(m.detail);
+      if (m.role === 'tool') collectRelativeToolPath(m);
+      collectPaths(m.text);
+    }
+    if (!paths.length) return '';
+    return [
+      '最近相关路径（按新近程度排序，可能来自附件、工具调用或 AI 回复）：',
+      ...paths.slice(0, 8).map((p) => `- ${p}`),
+      '用户说“刚生成的文件/这个文件/上面的文件/打开它/修改它”时，优先从这些路径里选择，不要重新追问文件是哪一个。',
     ].join('\n');
   }
 
@@ -536,6 +594,20 @@ module.exports = function createAI(ctx) {
 
   // ---------- 引擎 transcript 回显（读 ~/.claude/projects/<cwd-slug>/<sessionId>.jsonl）----------
   function projectSlug(cwd) { return String(cwd).replace(/[\\/.:]/g, '-'); }
+  function visibleTranscriptUserText(text) {
+    const s = String(text || '').trim();
+    if (!s) return '';
+    if (!s.startsWith('以下是本对话前文。')) return s;
+    const blocks = s.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const b = blocks[i];
+      if (!b || b.startsWith('以下是本对话前文。') || b.startsWith('如果用户说')) continue;
+      if (/^(用户|助手|工具)：/.test(b)) continue;
+      if (b.startsWith('（附件，请按需读取：')) continue;
+      return b;
+    }
+    return '';
+  }
   async function readTranscript(cwd, sessionId) {
     // 引擎按真实路径（symlink 解析后）存 transcript：/tmp → /private/tmp 这类都要试一遍
     const candidates = [cwd];
@@ -562,11 +634,17 @@ module.exports = function createAI(ctx) {
       if (j.isSidechain) continue;
       const content = j.message && j.message.content;
       if (!Array.isArray(content)) {
-        if (j.type === 'user' && typeof content === 'string' && content.trim()) msgs.push({ role: 'user', text: content });
+        if (j.type === 'user' && typeof content === 'string') {
+          const text = visibleTranscriptUserText(content);
+          if (text) msgs.push({ role: 'user', text });
+        }
         continue;
       }
       for (const b of content) {
-        if (j.type === 'user' && b.type === 'text' && b.text && !b.text.startsWith('<')) msgs.push({ role: 'user', text: b.text });
+        if (j.type === 'user' && b.type === 'text' && b.text && !b.text.startsWith('<')) {
+          const text = visibleTranscriptUserText(b.text);
+          if (text) msgs.push({ role: 'user', text });
+        }
         else if (j.type === 'assistant' && b.type === 'text' && b.text) msgs.push({ role: 'assistant', text: b.text });
         else if (j.type === 'assistant' && b.type === 'tool_use') msgs.push({ role: 'tool', name: b.name, detail: toolDetail(b.name, b.input) });
       }
@@ -576,6 +654,33 @@ module.exports = function createAI(ctx) {
   function toolDetail(name, input) {
     const a = input || {};
     return String(a.file_path || a.path || a.command || a.pattern || a.query || a.url || a.description || '').slice(0, 140);
+  }
+  function historyMessageKey(m) {
+    if (!m) return '';
+    if (m.role === 'tool') return ['tool', m.name || '', m.detail || ''].join('\0');
+    return [m.role || '', String(m.text || '').trim()].join('\0');
+  }
+  function mergeChatHistory(transcriptMessages, lightMessages) {
+    const out = [];
+    const seen = new Map();
+    const add = (m, preferExisting) => {
+      const key = historyMessageKey(m);
+      if (!key || key === '\0') return;
+      if (seen.has(key)) {
+        if (!preferExisting) return;
+        out[seen.get(key)] = { ...out[seen.get(key)], ...m };
+        return;
+      }
+      seen.set(key, out.length);
+      out.push(m);
+    };
+    if ((lightMessages || []).length) {
+      for (const m of lightMessages || []) add(m, true);
+      for (const m of transcriptMessages || []) add(m, false);
+      return out;
+    }
+    for (const m of transcriptMessages || []) add(m, false);
+    return out;
   }
 
   // ---------- HTTP 路由 ----------
@@ -652,9 +757,10 @@ module.exports = function createAI(ctx) {
       const id = url.searchParams.get('id');
       const chat = (await readChats()).find((c) => c.id === id);
       if (!chat) { sendJSON(res, 200, { messages: [] }); return true; }
-      if (Array.isArray(chat.messages) && chat.messages.length) { sendJSON(res, 200, { messages: chat.messages, chat }); return true; }
-      if (!chat.sessionId) { sendJSON(res, 200, { messages: [] }); return true; }
-      sendJSON(res, 200, { messages: await readTranscript(chat.cwd, chat.sessionId), chat });
+      const lightMessages = Array.isArray(chat.messages) ? chat.messages : [];
+      const transcriptMessages = chat.sessionId ? await readTranscript(chat.cwd, chat.sessionId) : [];
+      const messages = mergeChatHistory(transcriptMessages, lightMessages);
+      sendJSON(res, 200, { messages, chat });
       return true;
     }
     if (p === '/api/ai/chat-delete' && req.method === 'POST') {
@@ -693,6 +799,7 @@ module.exports = function createAI(ctx) {
     let runKey = chatId;
     let firstMsgLogged = false;
     let firstTextLogged = false;
+    let thinkingNotified = false;
     let warmInUse = null;
     try {
       const prov = await activeProvider();
@@ -712,6 +819,7 @@ module.exports = function createAI(ctx) {
 
       const prompt = [
         priorChatContextForAgent(chat),
+        recentPathContextForAgent(chat),
         text,
         ...(attachments || []).map((a) => `（附件，请按需读取：${a}）`),
       ].filter(Boolean).join('\n\n');
@@ -746,6 +854,8 @@ module.exports = function createAI(ctx) {
         q = query({ prompt, options });
       }
 
+      let agentAnswer = '';
+      const agentToolMessages = [];
       for await (const msg of q) {
         if (!firstMsgLogged) {
           firstMsgLogged = true;
@@ -766,25 +876,43 @@ module.exports = function createAI(ctx) {
                 firstTextLogged = true;
                 engineLog(`chat=${chat.id} first_text=${Date.now() - t0}ms`);
               }
+              agentAnswer += ev.delta.text || '';
               send({ type: 'text', delta: ev.delta.text });
             }
-            else if (ev.delta.type === 'thinking_delta' && ev.delta.thinking) send({ type: 'think', delta: ev.delta.thinking });
+            else if (ev.delta.type === 'thinking_delta' && !thinkingNotified) {
+              thinkingNotified = true;
+              send({ type: 'think' });
+            }
           }
         } else if (msg.type === 'assistant') {
           // 文本已经流过了，这里只取工具调用事件
           if (msg.parent_tool_use_id) continue;
           for (const b of (msg.message && msg.message.content) || []) {
-            if (b.type === 'tool_use') send({ type: 'tool', name: b.name, args: b.input });
+            if (!firstTextLogged && b.type === 'text') agentAnswer += b.text || '';
+            if (b.type === 'tool_use') {
+              agentToolMessages.push({ role: 'tool', name: b.name, detail: toolDetail(b.name, b.input) });
+              send({ type: 'tool', name: b.name, args: b.input });
+            }
           }
         } else if (msg.type === 'user') {
           if (!msg.parent_tool_use_id) send({ type: 'tool_done' });
         } else if (msg.type === 'result') {
-          await updateChats((list) => { const c = list.find((x) => x.id === chat.id); if (c) c.ts = Date.now(); return list; });
           if (msg.is_error && msg.subtype !== 'success') {
             engineLog(`chat=${chat.id} 引擎报错: ${String(msg.result || msg.subtype).slice(0, 300)}`);
             send({ type: 'error', message: String(msg.result || msg.subtype).slice(0, 500) });
           }
           engineLog(`chat=${chat.id} done=${Date.now() - t0}ms turns=${msg.num_turns || 0}${msg.is_error ? ' error' : ''}`);
+          await updateChats((list) => {
+            const c = list.find((x) => x.id === chat.id);
+            if (c) {
+              const agentHistoryMessages = [{ role: 'user', text, attachments: [...(attachments || [])] }];
+              agentHistoryMessages.push(...agentToolMessages);
+              if (agentAnswer.trim()) agentHistoryMessages.push({ role: 'assistant', text: agentAnswer });
+              c.messages = [...(c.messages || []), ...agentHistoryMessages].slice(-40);
+              c.ts = Date.now();
+            }
+            return list;
+          });
           const done = { type: 'done', turns: msg.num_turns };
           if (prov.key === 'claude' && msg.total_cost_usd > 0) done.cost = msg.total_cost_usd;
           send(done);

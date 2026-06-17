@@ -324,7 +324,7 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-const CHAT_PATH_RE = /(?:file:\/\/\/[A-Za-z]:\/[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|html?|png|jpe?g|webp|zip)|file:\/\/[^/\s]+\/[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|html?|png|jpe?g|webp|zip)|[A-Za-z]:[\\/][^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|html?|png|jpe?g|webp|zip)|\\\\[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|html?|png|jpe?g|webp|zip))/gi;
+const CHAT_PATH_RE = /(?:(?:[.][\\/]|[^\s\r\n<>"'`|\\/:]+[\\/])[^\s\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|markdown|csv|tsv|html?|png|jpe?g|gif|webp|svg|avif|zip|rar|7z|tar\.gz|tar|tgz|gz|bz2|xz|jsonl?|xml|ya?ml|toml|log)|file:\/\/\/[A-Za-z]:\/[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|markdown|csv|tsv|html?|png|jpe?g|gif|webp|svg|avif|zip|rar|7z|tar\.gz|tar|tgz|gz|bz2|xz|jsonl?|xml|ya?ml|toml|log)|file:\/\/[^/\s]+\/[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|markdown|csv|tsv|html?|png|jpe?g|gif|webp|svg|avif|zip|rar|7z|tar\.gz|tar|tgz|gz|bz2|xz|jsonl?|xml|ya?ml|toml|log)|[A-Za-z]:[\\/][^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|markdown|csv|tsv|html?|png|jpe?g|gif|webp|svg|avif|zip|rar|7z|tar\.gz|tar|tgz|gz|bz2|xz|jsonl?|xml|ya?ml|toml|log)|\\\\[^\r\n<>"'`|]+?\.(?:docx?|xlsx?|pptx?|pdf|txt|md|markdown|csv|tsv|html?|png|jpe?g|gif|webp|svg|avif|zip|rar|7z|tar\.gz|tar|tgz|gz|bz2|xz|jsonl?|xml|ya?ml|toml|log)|file:\/\/\/[A-Za-z]:\/(?:[^\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*\/){1,}[^\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*(?=$|[\s\r\n"')\]}>，。；;：:,、])|file:\/\/[^\/\s]+\/(?:[^\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*\/){1,}[^\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*(?=$|[\s\r\n"')\]}>，。；;：:,、])|[A-Za-z]:[\\/](?:[^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*[\\/]){1,}[^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*(?=$|[\s\r\n"')\]}>，。；;：:,、])|\\\\[^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*[\\/][^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*(?:[\\/][^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?: [A-Za-z0-9._()（）-]+)*)+(?=$|[\s\r\n"')\]}>，。；;：:,、])|file:\/\/\/[A-Za-z]:\/(?:[^\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+\/){1,}[^\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?=$|[\s\r\n"')\]}>，。；;：:,、])|file:\/\/[^\/\s]+\/(?:[^\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+\/){1,}[^\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?=$|[\s\r\n"')\]}>，。；;：:,、])|[A-Za-z]:[\\/](?:[^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+[\\/]){1,}[^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?=$|[\s\r\n"')\]}>，。；;：:,、])|\\\\[^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+[\\/][^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+(?:[\\/][^\\/\s\r\n<>"'`|，。；;：:,、()\[\]{}.]+)+(?=$|[\s\r\n"')\]}>，。；;：:,、]))/gi;
 function trimChatPath(raw) {
   return String(raw || '').trim().replace(/[)\]}>，。；;：:,、]+$/u, '');
 }
@@ -373,8 +373,8 @@ function resolveChatLocalPath(raw, baseDir = state.cwd) {
 }
 async function openChatPathReference(raw) {
   const p = resolveChatLocalPath(raw) || normalizeChatPath(raw);
-  const st = await api('/api/stat?path=' + encodeURIComponent(p)).catch((err) => ({ ok: false, error: err.message }));
-  if (!st || !st.ok) { toast('没找到路径：' + baseOf(p), true); return; }
+  const st = await api('/api/stat?path=' + encodeURIComponent(p)).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
+  if (!st || !st.ok) { toast('没找到路径：' + baseOf(p) + (st && st.error ? '（' + st.error + '）' : ''), true); return; }
   if (st.isDir) {
     await navigate(st.path);
     toast('已打开目录');
@@ -387,8 +387,8 @@ async function openChatPathReference(raw) {
   recordRecent(st.path);
   toast('已打开 ' + baseOf(st.path));
 }
-function chatPathActionNode(raw) {
-  const path = normalizeChatPath(raw);
+function chatPathActionNode(raw, baseDir = state.cwd) {
+  const path = resolveChatLocalPath(raw, baseDir) || normalizeChatPath(raw);
   const chip = document.createElement('span');
   chip.className = 'chat-path-action';
   chip.dataset.path = path;
@@ -415,12 +415,12 @@ function chatPathActionNode(raw) {
   });
   return chip;
 }
-function enhanceChatPathActions(root) {
+function enhanceChatPathActions(root, baseDir = state.cwd) {
   if (!root) return;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
-      if (!parent || parent.closest('a, button, pre, code, .chat-path-action')) return NodeFilter.FILTER_REJECT;
+      if (!parent || parent.closest('a, button, pre, .chat-path-action')) return NodeFilter.FILTER_REJECT;
       CHAT_PATH_RE.lastIndex = 0;
       return CHAT_PATH_RE.test(node.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
     },
@@ -438,7 +438,7 @@ function enhanceChatPathActions(root) {
       const raw = trimChatPath(m[0]);
       const end = m.index + raw.length;
       if (m.index > last) frag.append(document.createTextNode(text.slice(last, m.index)));
-      frag.append(chatPathActionNode(raw));
+      frag.append(chatPathActionNode(raw, baseDir));
       last = end;
     }
     if (last < text.length) frag.append(document.createTextNode(text.slice(last)));
@@ -510,7 +510,28 @@ async function navigate(p, pushHistory = true) {
     // 联动：监听此目录 + 各终端项目目录的文件变化（agent 改文件→自动刷新）；终端跟随则 cd 过去
     updateWatches();
     if (typeof term !== 'undefined' && term.followBrowse && term.active) term.syncCd(state.cwd);
-  } catch (e) { toast('打开失败', true); }
+  } catch (e) { toast('打开失败：' + friendlyNavigateError(e), true); }
+}
+function friendlyNavigateError(err) {
+  const s = friendlyErrorText(err);
+  if (!s) return '未知错误';
+  if (/Failed to fetch|NetworkError|Load failed|timeout|timed out|ECONNRESET|ECONNREFUSED/i.test(s)) return '文件服务暂时没有响应';
+  if (/EACCES|EPERM|permission|access denied|denied/i.test(s)) return '没有权限访问这个位置';
+  if (/ENOENT|not found|no such file|不存在/i.test(s)) return '这个位置已不存在';
+  return s;
+}
+function friendlyErrorText(err, fallback = '未知错误') {
+  let raw = '';
+  if (typeof err === 'string') raw = err;
+  else if (err && typeof err.message === 'string') raw = err.message;
+  else if (err && typeof err.error === 'string') raw = err.error;
+  else if (err && typeof err.reason === 'string') raw = err.reason;
+  else if (err != null) {
+    try { raw = String(err); } catch (_) { raw = ''; }
+  }
+  const s = String(raw || '').trim();
+  if (!s || s === '[object Object]') return fallback;
+  return s;
 }
 function folderTabTitle(p) { return p === 'this-pc' ? '此电脑' : (baseOf(p || '') || p || '主页'); }
 function activeFolderTab() {
@@ -1077,8 +1098,33 @@ async function searchCurrentTree() {
     renderFiles();
     toast(`已搜索子文件夹：${term}`);
   } catch (err) {
-    toast('搜索子文件夹失败：' + err.message, true);
+    $('#file-filter').value = term;
+    renderSearchFailure(term, root, err);
+    toast('搜索子文件夹失败：' + friendlySearchError(err), true);
   }
+}
+function friendlySearchError(err) {
+  const msg = err && err.message ? String(err.message) : String(err || '');
+  if (!msg) return '未知错误';
+  if (/Failed to fetch|NetworkError|Load failed|timeout|timed out/i.test(msg)) return '搜索服务暂时没有响应';
+  if (/EACCES|EPERM|permission|access denied|denied/i.test(msg)) return '没有权限读取这个位置';
+  if (/ENOENT|not found|no such file/i.test(msg)) return '这个位置已不存在';
+  return msg;
+}
+function renderSearchFailure(term, root, err) {
+  const area = $('#file-area');
+  const reason = friendlySearchError(err);
+  area.innerHTML = `<div class="empty-state"><div class="big">${ic('search', 'currentColor', 48)}</div>
+    搜索子文件夹失败<br>
+    <span class="empty-hint">关键词：${escapeHtml(term)} · 位置：${escapeHtml(root)}</span><br>
+    <span class="empty-hint">${escapeHtml(reason)}</span><br><br>
+    <button class="ghost-btn" id="search-retry">重试</button>
+    <button class="ghost-btn" id="search-back">返回当前目录</button>
+  </div>`;
+  const retry = $('#search-retry');
+  const back = $('#search-back');
+  if (retry) retry.onclick = () => searchCurrentTree();
+  if (back) back.onclick = () => { exitSearchMode(false); renderFiles(); };
 }
 function clearFileFilterFromKeyboard() {
   if (!state.filter && !state.searchMode) return false;
@@ -1224,6 +1270,24 @@ function scheduleEntryChunks(parent, list, from, makeEl, seq, onChunk, onDone) {
   };
   schedule(run);
 }
+function syncSelectionCursor() {
+  const visiblePaths = new Set(state.visible.map((e) => e.path));
+  if (state.multiSel && state.multiSel.size) {
+    state.multiSel = new Set([...state.multiSel].filter((p) => visiblePaths.has(p)));
+  }
+  if (state.selected && !visiblePaths.has(state.selected)) {
+    const fallback = state.multiSel && state.multiSel.size ? [...state.multiSel].pop() : null;
+    state.selected = fallback || null;
+  }
+  if (state.selected) {
+    const idx = state.visible.findIndex((e) => e.path === state.selected);
+    state.cursor = idx;
+    if (!state.selectionAnchor || !visiblePaths.has(state.selectionAnchor)) state.selectionAnchor = state.selected;
+  } else {
+    state.cursor = -1;
+    state.selectionAnchor = null;
+  }
+}
 function renderFiles() {
   if (state.skillsMode) return; // skills 视图自管 #file-area，文件渲染不要清掉它
   const area = $('#file-area');
@@ -1232,6 +1296,7 @@ function renderFiles() {
   state.visible = list;
   state.entryByPath = new Map(list.map((e) => [e.path, e]));
   state.domByPath = new Map();
+  syncSelectionCursor();
   let dirs = 0, bytes = 0;
   for (const e of list) {
     if (e.isDir) dirs++;
@@ -1382,13 +1447,28 @@ function maybeRenameBySlowClick(ev, el, e, wasSelected) {
   }, 260);
   return true;
 }
+function fileItemTitle(e, changed) {
+  const lines = [];
+  if (changed && changed.files && changed.files.size) {
+    const changedFiles = Array.from(changed.files || []).slice(0, 6);
+    const more = changed.files.size > changedFiles.length ? `…另 ${changed.files.size - changedFiles.length} 项` : '';
+    lines.unshift('刚变更：', ...changedFiles, more);
+  } else if (changed) lines.unshift('刚变更');
+  lines.push(e.name);
+  lines.push(e.path);
+  const kind = kindLabel(e);
+  if (kind) lines.push(kind);
+  if (!e.isDir && Number.isFinite(e.size)) lines.push(fmtSize(e.size));
+  return lines.filter(Boolean).join('\n');
+}
 function gridItem(e, i) {
   const el = document.createElement('div');
   const chg = state.changed && state.changed.get(e.name);
   el.className = 'item' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (isSelectedPath(e.path) ? ' selected' : '') + (isCutPath(e.path) ? ' cutting' : '') + (chg ? ' changed' : '');
   el.dataset.idx = i;
   el.dataset.path = e.path;
-  if (chg) { el.dataset.changed = chg.count > 1 ? '改·' + chg.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chg.count * 0.12).toFixed(2)); if (chg.files.size) el.title = '刚变更：\n' + [...chg.files].join('\n'); }
+  el.title = fileItemTitle(e, chg);
+  if (chg) { el.dataset.changed = chg.count > 1 ? '改·' + chg.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chg.count * 0.12).toFixed(2)); }
   el.innerHTML = `<div class="icon" style="--tint:${iconColorFor(e)}">${thumbHtml(e)}${projBadge(e)}</div><div class="fname">${escapeHtml(e.name)}</div>${favBtn(e)}`;
   bindItem(el, e);
   return el;
@@ -1399,7 +1479,8 @@ function listRow(e, i) {
   el.className = 'row' + (e.isDir ? ' is-dir' : ' is-file') + (e.hidden ? ' hidden-file' : '') + (isSelectedPath(e.path) ? ' selected' : '') + (isCutPath(e.path) ? ' cutting' : '') + (chgR ? ' changed' : '');
   el.dataset.idx = i;
   el.dataset.path = e.path;
-  if (chgR) { el.dataset.changed = chgR.count > 1 ? '改·' + chgR.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chgR.count * 0.12).toFixed(2)); if (chgR.files.size) el.title = '刚变更：\n' + [...chgR.files].join('\n'); }
+  el.title = fileItemTitle(e, chgR);
+  if (chgR) { el.dataset.changed = chgR.count > 1 ? '改·' + chgR.count : '改'; el.style.setProperty('--heat', Math.min(1, 0.4 + chgR.count * 0.12).toFixed(2)); }
   // 最近修改/搜索结果是跨目录列表，名称后缀显示来源目录，方便区分同名文件
   const dirHint = (state.recentMode || state.searchMode) ? ` <span class="row-dir">· ${escapeHtml(tilde(e.dir || dirOf(e.path)))}</span>` : '';
   const thumbSrc = `/api/thumb?path=${encodeURIComponent(e.path)}&w=96&v=${e.mtime || 0}`;
@@ -1415,6 +1496,7 @@ function listRow(e, i) {
 }
 function bindItem(el, e) {
   registerEntryElement(el, e.path);
+  el.tabIndex = -1;
   // 拖拽到终端：把路径作为上下文喂给 coding agent
   el.draggable = true;
   el.addEventListener('dragstart', (ev) => {
@@ -1508,9 +1590,17 @@ function entryElByPath(path) {
   if (found) registerEntryElement(found, path);
   return found;
 }
+function focusEntry(path) {
+  const el = entryElByPath(path);
+  if (!el) return;
+  el.tabIndex = -1;
+  el.focus({ preventScroll: true });
+}
 // 只切换变化项的 class，绝不重建/全量扫描；大目录方向键移动保持轻快
 function paintSelection(force = false) {
   if (force) {
+    const area = $('#file-area');
+    if (area) area.querySelectorAll('.selected').forEach((el) => el.classList.remove('selected'));
     state.paintedSelected.clear();
   }
   const paths = selPaths();
@@ -1532,6 +1622,7 @@ function paintSelection(force = false) {
   renderStatusbar();
   refreshTemplateAttachmentContextSummary();
   refreshChatComposerContext();
+  try { if (chat && typeof chat.updateComposer === 'function') chat.updateComposer(); } catch { /* chat not ready yet */ }
 }
 function paintCutMarks(force = false) {
   if (force) {
@@ -1557,8 +1648,9 @@ function applySelection(path) {
   state.selected = path;
   state.selectionAnchor = path;
   state.cursor = state.visible.findIndex((e) => e.path === path);
-  paintSelection();
+  paintSelection(true);
   highlightCursor();
+  focusEntry(path);
 }
 function selectVisiblePaths(paths) {
   const wanted = new Set((paths || []).filter(Boolean));
@@ -1573,8 +1665,9 @@ function selectVisiblePaths(paths) {
   }
   state.selectionAnchor = state.selected;
   state.cursor = state.visible.findIndex((e) => e.path === state.selected);
-  paintSelection();
+  paintSelection(true);
   highlightCursor();
+  focusEntry(state.selected);
   return true;
 }
 function internalDragPaths(dt) {
@@ -1590,6 +1683,12 @@ function internalDragPaths(dt) {
 function isInternalDrag(dt) {
   return !!(dt && (dt.types.includes('application/x-fanbox-paths') || dt.types.includes('application/x-fanbox-path')));
 }
+function clearFileDropHints() {
+  const fileArea = $('#file-area');
+  if (!fileArea) return;
+  fileArea.classList.remove('drop-in');
+  fileArea.querySelectorAll('.drop-target').forEach((x) => x.classList.remove('drop-target'));
+}
 function looksLikePath(s) {
   const p = String(s || '').trim();
   return !!p && (/^[A-Za-z]:[\\/]/.test(p) || /^\\\\/.test(p) || /^~?[\\/]/.test(p) || /^file:\/\//i.test(p));
@@ -1601,12 +1700,12 @@ async function dropInternalPathsToDir(paths, dstDir, copy, opts = {}) {
   const undoItems = [];
   for (const src of paths || []) {
     if (norm(src) === target || norm(dirOf(src)) === target) continue;
-    const r = await apiPost(copy ? '/api/copy-in' : '/api/move', { src, dstDir }).catch((err) => ({ ok: false, error: err.message }));
+    const r = await apiPost(copy ? '/api/copy-in' : '/api/move', { src, dstDir }).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
     if (r.ok) {
       okCount++;
       if (copy) undoItems.push({ path: r.path, from: src });
       else undoItems.push({ from: src, to: r.path });
-    } else lastErr = r.error || (copy ? '复制失败' : '移动失败');
+    } else lastErr = friendlyErrorText(r, copy ? '复制失败' : '移动失败');
   }
   if (okCount) {
     pushUndo({ type: copy ? 'copy' : 'move', items: undoItems, label: copy ? '复制' : '移动' });
@@ -1633,9 +1732,9 @@ async function copyExternalFilesToDir(files, dstDir, opts = {}) {
   for (const f of list) {
     const src = window.fanboxDrop && window.fanboxDrop.pathForFile(f);
     if (src) {
-      const r = await apiPost('/api/copy-in', { src, dstDir }).catch((err) => ({ ok: false, error: err.message }));
+      const r = await apiPost('/api/copy-in', { src, dstDir }).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
       if (r.ok) { okCount++; undoItems.push({ path: r.path, from: src }); }
-      else lastErr = r.error || '复制失败';
+      else lastErr = friendlyErrorText(r, '复制失败');
     } else if (f.size <= 64 * 1024 * 1024) {
       // 浏览器版拿不到源路径：直接把内容写进目标目录。
       try {
@@ -1643,8 +1742,8 @@ async function copyExternalFilesToDir(files, dstDir, opts = {}) {
         const dest = target + state.sep + f.name;
         const r = await apiPost('/api/write-binary', { path: dest, base64: abToBase64(buf) });
         if (r.ok) { okCount++; undoItems.push({ path: r.path || dest, from: f.name }); }
-        else lastErr = r.error || '写入失败';
-      } catch (err) { lastErr = err.message; }
+        else lastErr = friendlyErrorText(r, '写入失败');
+      } catch (err) { lastErr = friendlyErrorText(err); }
     } else {
       lastErr = `${f.name} 超过 64MB，浏览器版无法导入，请用桌面版`;
     }
@@ -1763,9 +1862,14 @@ function invertSelection() {
 function rectsIntersect(a, b) {
   return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
 }
+function clearMarqueeArtifacts() {
+  document.querySelectorAll('.marquee-box').forEach((x) => x.remove());
+  document.body.classList.remove('marquee-active');
+}
 function bindMarqueeSelection() {
   const host = $('#content');
   if (!host) return;
+  clearMarqueeArtifacts();
   let drag = null;
   const makeRect = (a, b) => ({
     left: Math.min(a.x, b.x), top: Math.min(a.y, b.y),
@@ -1817,17 +1921,23 @@ function bindMarqueeSelection() {
     if (!drag) return;
     document.removeEventListener('mousemove', onMove, true);
     document.removeEventListener('mouseup', finish, true);
+    document.removeEventListener('mouseleave', cancel, true);
+    window.removeEventListener('blur', cancel, true);
+    window.removeEventListener('pointerup', cancel, true);
+    window.removeEventListener('pointercancel', cancel, true);
+    document.removeEventListener('visibilitychange', cancel, true);
     if (drag.raf) cancelAnimationFrame(drag.raf);
-    if (drag.box) drag.box.remove();
-    document.body.classList.remove('marquee-active');
+    clearMarqueeArtifacts();
     if (!drag.started && !drag.additive) { state.multiSel.clear(); state.selected = null; state.selectionAnchor = null; paintSelection(); }
     drag = null;
     if (ev) ev.preventDefault();
   };
+  const cancel = () => finish();
   host.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0 || state.skillsMode) return;
     if (ev.target.closest('.item, .row, button, input, textarea, a, #statusbar, .preview-body')) return;
     if (!ev.target.closest('#file-area') && ev.target.id !== 'content') return;
+    clearMarqueeArtifacts();
     drag = {
       start: { x: ev.clientX, y: ev.clientY },
       now: { x: ev.clientX, y: ev.clientY },
@@ -1839,6 +1949,11 @@ function bindMarqueeSelection() {
     };
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('mouseup', finish, true);
+    document.addEventListener('mouseleave', cancel, true);
+    window.addEventListener('blur', cancel, true);
+    window.addEventListener('pointerup', cancel, true);
+    window.addEventListener('pointercancel', cancel, true);
+    document.addEventListener('visibilitychange', cancel, true);
   }, true);
 }
 // Ctrl/Cmd+点击：切换该项的选中（资源管理器习惯）
@@ -1960,6 +2075,7 @@ function selectCursorEntry() {
   state.selected = e.path;
   state.selectionAnchor = e.path;
   paintSelection();
+  focusEntry(e.path);
 }
 function visibleItemStep() {
   const host = $('#content');
@@ -2144,14 +2260,21 @@ async function openDocxPreview(e) {
         const st = $('#docx-state'); if (st) st.textContent = '已保存';
         toast('已保存（.docx 原格式，Word 可直接打开）');
         recordRecent(e.path);
-      } catch (err) { toast('保存失败: ' + err.message, true); }
+      } catch (err) { toast('保存失败：' + friendlyErrorText(err), true); }
       btn.disabled = false;
     };
     recordRecent(e.path);
   } catch (err) {
-    body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>Word 预览失败：${escapeHtml(err.message)}<br><br><button class="ghost-btn" id="docx-fallback">用系统应用打开</button></div>`;
+    body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>Word 预览失败：${escapeHtml(friendlyDocxPreviewError(err))}<br><br><button class="ghost-btn" id="docx-fallback">用系统应用打开</button></div>`;
     const fb = $('#docx-fallback'); if (fb) fb.onclick = () => openWith(e.path);
   }
+}
+function friendlyDocxPreviewError(err) {
+  const msg = err && err.message ? String(err.message) : String(err || '');
+  if (!msg || /Cannot read properties|undefined|null|OOXML|docx|zip|central directory|Bad|Unsupported|Invalid|corrupt|password|Encrypted|parse/i.test(msg)) {
+    return '文档结构异常，建议用系统应用打开';
+  }
+  return msg;
 }
 async function openXlsxPreview(e) {
   const body = setPreviewBodyMode('xlsx');
@@ -2180,9 +2303,16 @@ async function openXlsxPreview(e) {
     show(0);
     recordRecent(e.path);
   } catch (err) {
-    body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>表格解析失败：${escapeHtml(err.message)}<br><br><button class="ghost-btn" id="xlsx-fallback">用系统应用打开</button></div>`;
+    body.innerHTML = `<div class="empty-state"><div class="big">${iconSvg(e, 48)}</div>表格解析失败：${escapeHtml(friendlyXlsxPreviewError(err))}<br><br><button class="ghost-btn" id="xlsx-fallback">用系统应用打开</button></div>`;
     const fb = $('#xlsx-fallback'); if (fb) fb.onclick = () => openWith(e.path);
   }
+}
+function friendlyXlsxPreviewError(err) {
+  const msg = err && err.message ? String(err.message) : String(err || '');
+  if (!msg || /Cannot read properties|undefined|null|indexOf|Bad|Unsupported|Invalid|corrupt|password|Encrypted/i.test(msg)) {
+    return '表格结构异常，建议用系统应用打开';
+  }
+  return msg;
 }
 
 async function openPreview(e) {
@@ -2319,6 +2449,7 @@ function renderPreviewActions(e) {
   // 图标为主、文字精简：主操作「打开」留字，其余只留图标 + tooltip
   const acts = [
     { icon: ic('link', 'currentColor', 14), label: '打开', title: '默认应用打开', cls: 'primary', fn: () => openWith(e.path, 'default') },
+    ...(isExtractableArchive(e) ? [{ icon: iconSvg({ name: e.name, kind: 'archive' }, 15), label: '解压', title: '解压到当前目录', fn: () => extractArchiveEntry(e) }] : []),
     ...(e.kind === 'text' && !isMdName(e.name) ? [{ icon: ic('edit3', 'currentColor', 15), title: '编辑文本', fn: () => enterEditMode(e) }] : []), // md 预览即编辑，无需入口
     ...(e.kind === 'text' ? [{ icon: ic('gitbranch', 'currentColor', 15), title: '查看改动（HEAD vs 当前）', fn: () => showDiff(e) }] : []),
     ...(e.kind === 'image' ? [{ icon: ic('edit3', 'currentColor', 15), title: '编辑图片', fn: () => enterImageEdit(e) }] : []),
@@ -2350,8 +2481,8 @@ function renderPreviewFoot(e) {
   if (!e || e.isDir) { f.innerHTML = ''; return; }
   f.innerHTML = `<span title="大小">${e.size ? fmtSize(e.size) : '0 B'}</span><span title="创建时间">创建 ${fmtDateTime(e.btime)}</span><span title="修改时间">改 ${fmtDateTime(e.mtime)}</span>`;
 }
-async function copyImage(p) { const r = await window.fanboxClipboard.copyImage(p); toast(r.ok ? '已复制图片，可粘贴到其它应用' : '复制图片失败：' + (r.error || ''), !r.ok); }
-async function copyFile(p) { const r = await window.fanboxClipboard.copyFile(p); toast(r.ok ? '已复制文件，可在系统文件管理器里粘贴' : '复制文件失败', !r.ok); }
+async function copyImage(p) { const r = await window.fanboxClipboard.copyImage(p).catch((err) => ({ ok: false, error: friendlyErrorText(err) })); toast(r.ok ? '已复制图片，可粘贴到其它应用' : '复制图片失败：' + (r.error || '未知错误'), !r.ok); }
+async function copyFile(p) { const r = await window.fanboxClipboard.copyFile(p).catch((err) => ({ ok: false, error: friendlyErrorText(err) })); toast(r.ok ? '已复制文件，可在系统文件管理器里粘贴' : '复制文件失败：' + (r.error || '未知错误'), !r.ok); }
 async function closePreview(clearSelection = true) {
   if (!await guardDirty()) return;
   mona.disposeIfAny(); crepe.disposeIfAny(); imgEditState = null;
@@ -2416,30 +2547,73 @@ function flingToTerminal(text, fromRect) {
   setTimeout(() => ghost.remove(), 800); // 兜底清理
   if (panel && tRect) { panel.classList.remove('term-catch'); void panel.offsetWidth; panel.classList.add('term-catch'); setTimeout(() => panel.classList.remove('term-catch'), 520); }
 }
-// 在预览里选中文字 → 浮现「发到终端」按钮，一键把这段作为上下文喂给 agent（md/代码/文本预览生效）
+function sendPreviewSelectionToChat(text) {
+  const input = $('#chat-input');
+  if (!input) return;
+  const clean = String(text || '').trim();
+  if (!clean) return;
+  const source = state.selected || '';
+  const block = `引用当前预览选中文本\n来源：${state.selected || '当前预览'}\n\n${clean}`;
+  chat.open();
+  if (source) chat.addAttachment(source);
+  input.value = input.value ? `${input.value.trimEnd()}\n\n${block}` : block;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.focus();
+  toast('已放进对话输入框，补一句要求再发送');
+}
+// 在预览里选中文字 → 浮现「发到对话 / 发到终端」按钮，把片段作为上下文喂给 AI 或 agent
 function bindSelectionToTerminal() {
   const body = $('#preview-body');
   if (!body) return;
   let btn = null;
+  let selTimer = null;
   const hide = () => { if (btn) { btn.remove(); btn = null; } };
   const show = () => {
     const sel = window.getSelection();
     const text = sel && sel.toString().trim();
-    if (!text || !term.available()) { hide(); return; }
+    if (!text) { hide(); return; }
     const node = sel.anchorNode;
     const host = node && (node.nodeType === 3 ? node.parentNode : node);
     if (!host || !body.contains(host)) { hide(); return; } // 选区必须落在预览正文里
     const rect = sel.getRangeAt(0).getBoundingClientRect();
     if (!rect || (!rect.width && !rect.height)) { hide(); return; }
-    if (!btn) { btn = document.createElement('button'); btn.className = 'sel-send'; document.body.appendChild(btn); }
-    btn.innerHTML = `${ic('term', 'currentColor', 13)} 发到终端`;
+    if (!btn) {
+      btn = document.createElement('div');
+      btn.className = 'sel-send-group';
+      const chatBtn = document.createElement('button');
+      chatBtn.className = 'sel-send';
+      chatBtn.dataset.act = 'chat';
+      chatBtn.innerHTML = `${ic('chat', 'currentColor', 13)} 发到对话`;
+      btn.appendChild(chatBtn);
+      if (term.available()) {
+        const termBtn = document.createElement('button');
+        termBtn.className = 'sel-send';
+        termBtn.dataset.act = 'term';
+        termBtn.innerHTML = `${ic('term', 'currentColor', 13)} 发到终端`;
+        btn.appendChild(termBtn);
+      }
+      document.body.appendChild(btn);
+    }
     const top = Math.min(window.innerHeight - 44, rect.bottom + 8);
     btn.style.top = top + 'px';
-    btn.style.left = Math.max(8, Math.min(window.innerWidth - 130, rect.left)) + 'px';
+    btn.style.left = Math.max(8, Math.min(window.innerWidth - 220, rect.left)) + 'px';
     btn.onmousedown = (ev) => ev.preventDefault(); // 别让点击清掉选区
-    btn.onclick = () => { const r = btn.getBoundingClientRect(); flingToTerminal(text, r); term.sendContext(text, state.selected); hide(); toast('已甩进终端，补一句要求再回车'); };
+    btn.onclick = (ev) => {
+      const action = ev.target.closest('[data-act]')?.dataset.act;
+      if (action === 'chat') { sendPreviewSelectionToChat(text); hide(); return; }
+      if (action === 'term') {
+        const r = btn.getBoundingClientRect();
+        flingToTerminal(text, r);
+        term.sendContext(text, state.selected);
+        hide();
+        toast('已发到终端，确认后再回车');
+      }
+    };
   };
-  body.addEventListener('mouseup', () => setTimeout(show, 10));
+  const scheduleShow = () => { clearTimeout(selTimer); selTimer = setTimeout(show, 10); };
+  body.addEventListener('mouseup', scheduleShow);
+  body.addEventListener('keyup', scheduleShow);
+  document.addEventListener('selectionchange', scheduleShow);
   body.addEventListener('scroll', hide, true);
   document.addEventListener('mousedown', (ev) => { if (btn && ev.target !== btn && !btn.contains(ev.target)) hide(); });
 }
@@ -2483,7 +2657,82 @@ function bindSidebarResizer() {
 function applyPreviewSize() {
   const pv = $('#preview');
   if (!pv || pv.classList.contains('hidden')) return;
-  pv.style.flexBasis = (term.dock === 'right' ? (state.previewH || 340) : state.previewW) + 'px';
+  const size = term.dock === 'right' ? (state.previewH || 340) : state.previewW;
+  pv.style.flex = `0 0 ${size}px`;
+  pv.style.flexBasis = `${size}px`;
+  if (term.dock === 'right') {
+    pv.style.height = `${size}px`;
+    pv.style.width = '';
+    pv.style.minHeight = `${size}px`;
+    pv.style.maxHeight = `${size}px`;
+    pv.style.minWidth = '';
+    pv.style.maxWidth = '';
+  } else {
+    pv.style.width = `${size}px`;
+    pv.style.height = '';
+    pv.style.minWidth = `${size}px`;
+    pv.style.maxWidth = `${size}px`;
+    pv.style.minHeight = '';
+    pv.style.maxHeight = '';
+  }
+  updatePreviewResizerA11y();
+}
+function previewResizeBounds() {
+  const fm = $('#filemgmt')?.getBoundingClientRect();
+  if (!fm) return { min: term.dock === 'right' ? 140 : 260, max: term.dock === 'right' ? 340 : 480 };
+  if (term.dock === 'right') return { min: 140, max: Math.max(140, Math.round(fm.height - 120)) };
+  return { min: 260, max: Math.max(260, Math.round(fm.width - 220)) };
+}
+function applyPreviewResizeValue(value, persist) {
+  const bounds = previewResizeBounds();
+  const key = term.dock === 'right' ? 'previewH' : 'previewW';
+  const fallback = term.dock === 'right' ? 340 : 480;
+  const raw = value == null ? state[key] || fallback : value;
+  state[key] = Math.round(Math.min(bounds.max, Math.max(bounds.min, Number(raw) || fallback)));
+  applyPreviewSize();
+  if (persist) {
+    localStorage.setItem('fb_preview_w', state.previewW);
+    localStorage.setItem('fb_preview_h', state.previewH || 340);
+  }
+  return state[key];
+}
+function updatePreviewResizerA11y() {
+  const handle = $('#preview-resizer');
+  if (!handle) return;
+  const bounds = previewResizeBounds();
+  const value = term.dock === 'right' ? (state.previewH || 340) : state.previewW;
+  const orientation = term.dock === 'right' ? 'horizontal' : 'vertical';
+  handle.setAttribute('aria-orientation', orientation);
+  handle.setAttribute('aria-valuemin', String(bounds.min));
+  handle.setAttribute('aria-valuemax', String(bounds.max));
+  handle.setAttribute('aria-valuenow', String(value));
+}
+function handlePreviewResizerKey(e) {
+  const step = e.shiftKey ? 50 : 20;
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    if (term.dock !== 'right') applyPreviewResizeValue(state.previewW + step, true);
+  }
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    if (term.dock !== 'right') applyPreviewResizeValue(state.previewW - step, true);
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (term.dock === 'right') applyPreviewResizeValue((state.previewH || 340) + step, true);
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (term.dock === 'right') applyPreviewResizeValue((state.previewH || 340) - step, true);
+  }
+  if (e.key === 'Home') {
+    e.preventDefault();
+    applyPreviewResizeValue(previewResizeBounds().min, true);
+  }
+  if (e.key === 'End') {
+    e.preventDefault();
+    applyPreviewResizeValue(previewResizeBounds().max, true);
+  }
 }
 // 离散布局切换时短暂开启过渡（拖拽时不开，保证跟手）
 function animateLayout() {
@@ -2694,22 +2943,22 @@ async function ieSave(st, asNew) {
 async function openNewWindow(p = state.cwd) {
   const target = p || state.cwd || state.home || '';
   if (window.fanboxWindow && window.fanboxWindow.open) {
-    const r = await window.fanboxWindow.open(target).catch((err) => ({ ok: false, error: err.message }));
-    toast(r.ok ? '已在新窗口打开' : '新窗口打开失败：' + (r.error || ''), !r.ok);
+    const r = await window.fanboxWindow.open(target).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
+    toast(r.ok ? '已在新窗口打开' : '新窗口打开失败：' + (r.error || '未知错误'), !r.ok);
     return;
   }
   window.open(target ? `/?targetPath=${encodeURIComponent(target)}` : '/', '_blank', 'noopener');
 }
 async function closeCurrentWindow() {
   if (window.fanboxWindow && window.fanboxWindow.close) {
-    const r = await window.fanboxWindow.close().catch((err) => ({ ok: false, error: err.message }));
-    if (!r.ok) toast('关闭窗口失败：' + (r.error || ''), true);
+    const r = await window.fanboxWindow.close().catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
+    if (!r.ok) toast('关闭窗口失败：' + (r.error || '未知错误'), true);
     return;
   }
   window.close();
 }
 async function openWith(p, withApp) {
-  const r = await apiPost('/api/open', { path: p, with: withApp });
+  const r = await apiPost('/api/open', { path: p, with: withApp }).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
   if (r.ok) {
     const used = r.with;
     if (used === 'reveal') toast('已在文件管理器中显示');
@@ -2718,10 +2967,10 @@ async function openWith(p, withApp) {
     else if (withApp === 'editor' && used === 'default') toast('未找到 code 命令，已用默认应用打开');
     else toast('已打开');
     loadFavorites();
-  } else toast('打开失败：' + (r.error || ''), true);
+  } else toast('打开失败：' + (r.error || '未知错误'), true);
 }
 async function shortcutTargetInfo(e) {
-  const r = await apiPost('/api/shortcut/target', { path: e.path }).catch((err) => ({ ok: false, error: err.message }));
+  const r = await apiPost('/api/shortcut/target', { path: e.path }).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
   if (!r.ok || !r.target) throw new Error(r.error || '未找到快捷方式目标');
   return r;
 }
@@ -2732,7 +2981,7 @@ async function openShortcutTarget(e) {
     if (r.isDir) { await navigate(r.target); toast('已打开快捷方式目标'); return; }
     await openWith(r.target, 'default');
   } catch (err) {
-    toast('打开快捷方式失败：' + (err.message || err), true);
+    toast('打开快捷方式失败：' + friendlyErrorText(err), true);
   }
 }
 async function revealShortcutTarget(e) {
@@ -2741,7 +2990,7 @@ async function revealShortcutTarget(e) {
     if (!r.exists) { toast('快捷方式目标不存在：' + r.target, true); return; }
     await revealEntryInCurrentApp({ path: r.target });
   } catch (err) {
-    toast('打开目标位置失败：' + (err.message || err), true);
+    toast('打开目标位置失败：' + friendlyErrorText(err), true);
   }
 }
 async function copyPath(p) {
@@ -2750,10 +2999,11 @@ async function copyPath(p) {
 function quotePath(p) {
   return `"${String(p).replace(/"/g, '\\"')}"`;
 }
-async function copyPaths(paths, opts = {}) {
-  const list = (paths || []).filter(Boolean);
-  if (!list.length) return;
-  const text = (opts.quote ? list.map(quotePath) : list).join('\n');
+function formatCopyFailMessage(failMsg, err) {
+  const reason = friendlyErrorText(err, '');
+  return reason ? `${failMsg}：${reason}` : failMsg;
+}
+async function copyText(text, okMsg = '已复制', failMsg = '复制失败') {
   try {
     if (window.fanboxClipboard && window.fanboxClipboard.copyText) {
       const r = await window.fanboxClipboard.copyText(text);
@@ -2761,10 +3011,16 @@ async function copyPaths(paths, opts = {}) {
     } else {
       await navigator.clipboard.writeText(text);
     }
-    toast(opts.quote ? (list.length > 1 ? `已复制 ${list.length} 个带引号路径` : '已复制为路径') : (list.length > 1 ? `已复制 ${list.length} 个路径` : '已复制路径'));
-  } catch {
-    toast('复制失败（浏览器限制），路径：' + text, true);
+    toast(okMsg);
+  } catch (err) {
+    toast(formatCopyFailMessage(failMsg, err), true);
   }
+}
+async function copyPaths(paths, opts = {}) {
+  const list = (paths || []).filter(Boolean);
+  if (!list.length) return;
+  const text = (opts.quote ? list.map(quotePath) : list).join('\n');
+  await copyText(text, opts.quote ? (list.length > 1 ? `已复制 ${list.length} 个带引号路径` : '已复制为路径') : (list.length > 1 ? `已复制 ${list.length} 个路径` : '已复制路径'), '复制路径失败，路径：' + text);
 }
 async function copyPathsQuoted(paths) {
   return copyPaths(paths, { quote: true });
@@ -2795,7 +3051,7 @@ async function undoLast() {
   const op = state.undoStack.pop();
   if (!op) { toast('没有可撤销的文件操作'); return; }
   if (op.type === 'rename') {
-    const r = await apiPost('/api/rename', { path: op.toPath, newName: op.fromName }).catch((err) => ({ error: err.message }));
+    const r = await apiPost('/api/rename', { path: op.toPath, newName: op.fromName }).catch((err) => ({ error: friendlyErrorText(err) }));
     if (r.error) { state.undoStack.push(op); toast('撤销重命名失败：' + r.error, true); return; }
     toast('已撤销重命名');
     await refresh();
@@ -2804,7 +3060,7 @@ async function undoLast() {
     return;
   }
   if (op.type === 'create') {
-    const r = await apiPost('/api/trash', { path: op.path }).catch((err) => ({ error: err.message }));
+    const r = await apiPost('/api/trash', { path: op.path }).catch((err) => ({ error: friendlyErrorText(err) }));
     if (r.error) { state.undoStack.push(op); toast('撤销新建失败：' + r.error, true); return; }
     toast('已撤销新建');
     if (state.selected === op.path) { state.selected = null; state.selectionAnchor = null; }
@@ -2813,44 +3069,44 @@ async function undoLast() {
     return;
   }
   if (op.type === 'copy') {
-    let fail = 0;
+    let fail = 0, lastErr = '';
     for (const it of op.items || []) {
-      const r = await apiPost('/api/trash', { path: it.path }).catch((err) => ({ error: err.message }));
-      if (r.error) fail++;
+      const r = await apiPost('/api/trash', { path: it.path }).catch((err) => ({ error: friendlyErrorText(err) }));
+      if (r.error) { fail++; lastErr = r.error || '撤销复制失败'; }
     }
-    toast(fail ? `撤销复制完成，${fail} 项失败` : `已撤销复制 ${op.items.length} 项`);
+    toast(fail ? `撤销复制完成，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已撤销复制 ${op.items.length} 项`);
     await refresh();
     if (!fail) pushRedo(op); else state.undoStack.push(op);
     return;
   }
   if (op.type === 'move') {
-    let fail = 0, restored = [], redoItems = [];
+    let fail = 0, restored = [], redoItems = [], lastErr = '';
     for (const it of [...(op.items || [])].reverse()) {
-      const r = await apiPost('/api/move', { src: it.to, dstDir: dirOf(it.from) }).catch((err) => ({ error: err.message }));
-      if (r.error) fail++;
+      const r = await apiPost('/api/move', { src: it.to, dstDir: dirOf(it.from) }).catch((err) => ({ error: friendlyErrorText(err) }));
+      if (r.error) { fail++; lastErr = r.error || '撤销移动失败'; }
       else { restored.push(r.path); redoItems.push({ ...it, from: r.path }); }
     }
-    toast(fail ? `撤销移动完成，${fail} 项失败` : `已撤销移动 ${op.items.length} 项`);
+    toast(fail ? `撤销移动完成，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已撤销移动 ${op.items.length} 项`);
     await refresh();
     if (restored[0]) applySelection(restored[0]);
     if (!fail) pushRedo({ ...op, items: redoItems.reverse() }); else state.undoStack.push(op);
     return;
   }
   if (op.type === 'trash') {
-    let fail = 0, restored = [];
+    let fail = 0, restored = [], lastErr = '';
     for (const it of [...(op.items || [])].reverse()) {
-      const r = await apiPost('/api/trash-restore', { trashPath: it.trashPath, path: it.from, trashKind: it.trashKind }).catch((err) => ({ error: err.message }));
-      if (r.error) fail++;
+      const r = await apiPost('/api/trash-restore', { trashPath: it.trashPath, path: it.from, trashKind: it.trashKind }).catch((err) => ({ error: friendlyErrorText(err) }));
+      if (r.error) { fail++; lastErr = r.error || '恢复失败'; }
       else restored.push({ ...it, from: r.path });
     }
-    toast(fail ? `撤销删除完成，${fail} 项恢复失败` : `已恢复 ${restored.length} 项`);
+    toast(fail ? `撤销删除完成，${fail} 项恢复失败${lastErr ? `：${lastErr}` : ''}` : `已恢复 ${restored.length} 项`);
     await refresh();
     selectVisiblePaths(restored.map((it) => it.from));
     if (!fail) pushRedo({ ...op, items: restored.reverse() }); else state.undoStack.push(op);
     return;
   }
   if (op.type === 'archiveCreate' || op.type === 'archiveExtract') {
-    const r = await apiPost('/api/trash', { path: op.path }).catch((err) => ({ error: err.message }));
+    const r = await apiPost('/api/trash', { path: op.path }).catch((err) => ({ error: friendlyErrorText(err) }));
     if (r.error) { state.undoStack.push(op); toast('撤销失败：' + r.error, true); return; }
     toast(op.type === 'archiveCreate' ? '已撤销压缩' : '已撤销解压');
     await refresh();
@@ -2858,12 +3114,12 @@ async function undoLast() {
     return;
   }
   if (op.type === 'shortcut') {
-    let fail = 0;
+    let fail = 0, lastErr = '';
     for (const it of op.items || []) {
-      const r = await apiPost('/api/trash', { path: it.path }).catch((err) => ({ error: err.message }));
-      if (r.error) fail++;
+      const r = await apiPost('/api/trash', { path: it.path }).catch((err) => ({ error: friendlyErrorText(err) }));
+      if (r.error) { fail++; lastErr = r.error || '撤销快捷方式失败'; }
     }
-    toast(fail ? `撤销快捷方式完成，${fail} 项失败` : `已撤销快捷方式 ${op.items.length} 项`);
+    toast(fail ? `撤销快捷方式完成，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已撤销快捷方式 ${op.items.length} 项`);
     await refresh();
     if (!fail) pushRedo(op); else state.undoStack.push(op);
     return;
@@ -2875,7 +3131,7 @@ async function redoLast() {
   const op = state.redoStack.pop();
   if (!op) { toast('没有可重做的文件操作'); return; }
   if (op.type === 'rename') {
-    const r = await apiPost('/api/rename', { path: op.fromPath, newName: op.toName }).catch((err) => ({ error: err.message }));
+    const r = await apiPost('/api/rename', { path: op.fromPath, newName: op.toName }).catch((err) => ({ error: friendlyErrorText(err) }));
     if (r.error) { state.redoStack.push(op); toast('重做重命名失败：' + r.error, true); return; }
     toast('已重做重命名');
     await refresh();
@@ -2884,7 +3140,7 @@ async function redoLast() {
     return;
   }
   if (op.type === 'create') {
-    const r = await apiPost('/api/create', { path: dirOf(op.path), name: op.name || baseOf(op.path), type: op.isDir ? 'dir' : 'file' }).catch((err) => ({ error: err.message }));
+    const r = await apiPost('/api/create', { path: dirOf(op.path), name: op.name || baseOf(op.path), type: op.isDir ? 'dir' : 'file' }).catch((err) => ({ error: friendlyErrorText(err) }));
     if (r.error) { state.redoStack.push(op); toast('重做新建失败：' + r.error, true); return; }
     toast('已重做新建');
     await refresh();
@@ -2893,45 +3149,45 @@ async function redoLast() {
     return;
   }
   if (op.type === 'copy') {
-    let fail = 0, copied = [];
+    let fail = 0, copied = [], lastErr = '';
     for (const it of op.items || []) {
-      const r = await apiPost('/api/copy-in', { src: it.from, dstDir: dirOf(it.path) }).catch((err) => ({ error: err.message }));
-      if (r.error) fail++;
+      const r = await apiPost('/api/copy-in', { src: it.from, dstDir: dirOf(it.path) }).catch((err) => ({ error: friendlyErrorText(err) }));
+      if (r.error) { fail++; lastErr = r.error || '重做复制失败'; }
       else copied.push({ ...it, path: r.path });
     }
-    toast(fail ? `重做复制完成，${fail} 项失败` : `已重做复制 ${copied.length} 项`);
+    toast(fail ? `重做复制完成，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已重做复制 ${copied.length} 项`);
     await refresh();
     selectVisiblePaths(copied.map((it) => it.path));
     if (!fail) pushUndo({ ...op, items: copied }, { clearRedo: false }); else state.redoStack.push(op);
     return;
   }
   if (op.type === 'move') {
-    let fail = 0, moved = [];
+    let fail = 0, moved = [], lastErr = '';
     for (const it of op.items || []) {
-      const r = await apiPost('/api/move', { src: it.from, dstDir: dirOf(it.to) }).catch((err) => ({ error: err.message }));
-      if (r.error) fail++;
+      const r = await apiPost('/api/move', { src: it.from, dstDir: dirOf(it.to) }).catch((err) => ({ error: friendlyErrorText(err) }));
+      if (r.error) { fail++; lastErr = r.error || '重做移动失败'; }
       else moved.push({ ...it, to: r.path });
     }
-    toast(fail ? `重做移动完成，${fail} 项失败` : `已重做移动 ${moved.length} 项`);
+    toast(fail ? `重做移动完成，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已重做移动 ${moved.length} 项`);
     await refresh();
     selectVisiblePaths(moved.map((it) => it.to));
     if (!fail) pushUndo({ ...op, items: moved }, { clearRedo: false }); else state.redoStack.push(op);
     return;
   }
   if (op.type === 'trash') {
-    let fail = 0, trashed = [];
+    let fail = 0, trashed = [], lastErr = '';
     for (const it of op.items || []) {
-      const r = await apiPost('/api/trash-undoable', { path: it.from }).catch((err) => ({ error: err.message }));
-      if (r.error) fail++;
+      const r = await apiPost('/api/trash-undoable', { path: it.from }).catch((err) => ({ error: friendlyErrorText(err) }));
+      if (r.error) { fail++; lastErr = r.error || '删除失败'; }
       else trashed.push({ ...it, ...trashUndoItemFromResult(it, r) });
     }
-    toast(fail ? `重做删除完成，${fail} 项失败` : `已重做删除 ${trashed.length} 项`);
+    toast(fail ? `重做删除完成，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已重做删除 ${trashed.length} 项`);
     await refresh();
     if (!fail) pushUndo({ ...op, items: trashed }, { clearRedo: false }); else state.redoStack.push(op);
     return;
   }
   if (op.type === 'archiveCreate') {
-    const r = await apiPost('/api/archive/create-zip', { paths: op.paths, dstDir: op.dstDir, name: op.name }).catch((err) => ({ error: err.message }));
+    const r = await apiPost('/api/archive/create-zip', { paths: op.paths, dstDir: op.dstDir, name: op.name }).catch((err) => ({ error: friendlyErrorText(err) }));
     if (r.error || !r.ok) { state.redoStack.push(op); toast('重做压缩失败：' + (r.error || '压缩失败'), true); return; }
     toast('已重做压缩');
     await refresh();
@@ -2940,7 +3196,7 @@ async function redoLast() {
     return;
   }
   if (op.type === 'archiveExtract') {
-    const r = await apiPost('/api/archive/extract', { path: op.archive }).catch((err) => ({ error: err.message }));
+    const r = await apiPost('/api/archive/extract', { path: op.archive }).catch((err) => ({ error: friendlyErrorText(err) }));
     if (r.error || !r.ok) { state.redoStack.push(op); toast('重做解压失败：' + (r.error || '解压失败'), true); return; }
     toast('已重做解压');
     await refresh();
@@ -2949,13 +3205,13 @@ async function redoLast() {
     return;
   }
   if (op.type === 'shortcut') {
-    let fail = 0, created = [];
+    let fail = 0, created = [], lastErr = '';
     for (const it of op.items || []) {
-      const r = await apiPost('/api/shortcut', { path: it.target, dstDir: it.dstDir || dirOf(it.path) }).catch((err) => ({ error: err.message }));
-      if (r.error || !r.ok) fail++;
+      const r = await apiPost('/api/shortcut', { path: it.target, dstDir: it.dstDir || dirOf(it.path) }).catch((err) => ({ error: friendlyErrorText(err) }));
+      if (r.error || !r.ok) { fail++; lastErr = r.error || '重做快捷方式失败'; }
       else created.push({ ...it, path: r.path, name: r.name || baseOf(r.path), dstDir: dirOf(r.path) });
     }
-    toast(fail ? `重做快捷方式完成，${fail} 项失败` : `已重做快捷方式 ${created.length} 项`);
+    toast(fail ? `重做快捷方式完成，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已重做快捷方式 ${created.length} 项`);
     await refresh();
     selectVisiblePaths(created.map((it) => it.path));
     if (!fail) pushUndo({ ...op, items: created }, { clearRedo: false }); else state.redoStack.push(op);
@@ -3046,7 +3302,7 @@ async function enterEditMode(e) {
       if (ok) return save(true);
       return;
     }
-    if (r.ok === false || r.error) { toast('保存失败：' + (r.error || ''), true); return; }
+    if (r.ok === false || r.error) { toast('保存失败：' + (r.error || '未知错误'), true); return; }
     baseMtime = r.mtime; baseline = content; // 更新已保存基准
     toast('已保存');
     refresh(); // 后台刷新文件区，不打断编辑（⌘S 留在编辑器里）
@@ -3114,7 +3370,7 @@ async function mdEditor(e, data, mode = 'rich') {
       setStatus('未保存：文件被外部修改');
       return;
     }
-    if (r.ok === false || r.error) { setStatus('保存失败'); toast('保存失败：' + (r.error || ''), true); return; }
+    if (r.ok === false || r.error) { setStatus('保存失败'); toast('保存失败：' + (r.error || '未知错误'), true); return; }
     baseMtime = r.mtime; baseline = content;
     setStatus('已保存');
   };
@@ -3252,7 +3508,7 @@ async function commitRename(e, name, opts = {}) {
     if (!ok) return null;
   }
   const r = await apiPost('/api/rename', { path: e.path, newName: name });
-  if (r.error) { toast('重命名失败：' + r.error, true); return null; }
+  if (r.error) { toast('重命名失败：' + friendlyErrorText(r), true); return null; }
   toast('已重命名');
   if (!opts.skipUndo) pushUndo({ type: 'rename', fromPath: e.path, toPath: r.path, fromName: e.name, toName: name });
   if (state.selected === e.path) state.selected = r.path;
@@ -3272,15 +3528,15 @@ async function trashSelection() {
   const nextIdx = Math.min(...items.map((it) => state.visible.findIndex((e) => e.path === it.path)).filter((i) => i >= 0));
   const ok = await confirmDialog(`把选中的 ${items.length} 项移到废纸篓？可从废纸篓恢复。`);
   if (!ok) return;
-  let fail = 0;
+  let fail = 0, lastErr = '';
   const undoItems = [];
   for (const it of items) {
     const r = await apiPost('/api/trash-undoable', { path: it.path });
-    if (r.error) fail++;
+    if (r.error) { fail++; lastErr = friendlyErrorText(r, '删除失败'); }
     else undoItems.push(trashUndoItemFromResult(it, r));
   }
   if (undoItems.length) pushUndo({ type: 'trash', items: undoItems, label: '删除' });
-  toast(fail ? `完成，${fail} 项删除失败` : `已把 ${items.length} 项移到废纸篓，Ctrl+Z 可恢复`);
+  toast(fail ? `完成，${fail} 项删除失败${lastErr ? `：${lastErr}` : ''}` : `已把 ${items.length} 项移到废纸篓，Ctrl+Z 可恢复`);
   state.multiSel.clear();
   await refresh();
   if (Number.isFinite(nextIdx)) selectNearestIndex(nextIdx);
@@ -3295,12 +3551,12 @@ async function deleteSelectionPermanent() {
   const nextIdx = Math.min(...items.map((it) => state.visible.findIndex((e) => e.path === it.path)).filter((i) => i >= 0));
   const ok = await confirmDialog(`永久删除选中的 ${items.length} 项？不会进入废纸篓。`);
   if (!ok) return;
-  let fail = 0;
+  let fail = 0, lastErr = '';
   for (const it of items) {
     const r = await apiPost('/api/delete', { path: it.path });
-    if (r.error) fail++;
+    if (r.error) { fail++; lastErr = friendlyErrorText(r, '永久删除失败'); }
   }
-  toast(fail ? `完成，${fail} 项永久删除失败` : `已永久删除 ${items.length} 项`);
+  toast(fail ? `完成，${fail} 项永久删除失败${lastErr ? `：${lastErr}` : ''}` : `已永久删除 ${items.length} 项`);
   if (items.some((it) => it.path === state.selected)) closePreview();
   state.selected = null;
   state.multiSel.clear();
@@ -3315,7 +3571,7 @@ async function clipSet(op) {
   paintCutMarks();
   let sys = false;
   if (window.fanboxClipboard && window.fanboxClipboard.copyFiles) {
-    const r = await window.fanboxClipboard.copyFiles(paths, op).catch((err) => ({ ok: false, error: err.message }));
+    const r = await window.fanboxClipboard.copyFiles(paths, op).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
     sys = !!r.ok;
   }
   const extra = sys ? `；也可在系统文件管理器里${op === 'cut' ? '移动' : '粘贴'}` : '';
@@ -3324,23 +3580,26 @@ async function clipSet(op) {
 async function clipPaste(dstDir) {
   if (isVirtualLocation() && !dstDir) { toast('请先打开一个磁盘或文件夹再粘贴', true); return; }
   let clip = state.fileClip;
+  let clipReadError = '';
   if ((!clip || !clip.paths.length) && window.fanboxClipboard && window.fanboxClipboard.readFiles) {
-    const r = await window.fanboxClipboard.readFiles().catch((err) => ({ ok: false, paths: [], error: err.message }));
+    const r = await window.fanboxClipboard.readFiles().catch((err) => ({ ok: false, paths: [], error: friendlyErrorText(err) }));
     if (r.ok && r.paths && r.paths.length) clip = { op: r.op === 'cut' ? 'cut' : 'copy', paths: r.paths, external: true };
+    else if (!r.ok || r.error) clipReadError = friendlyErrorText(r, '读取失败');
   }
-  if (!clip || !clip.paths.length) return;
+  if (clipReadError) { toast('读取剪贴板失败：' + friendlyErrorText(clipReadError), true); return; }
+  if (!clip || !clip.paths.length) { toast('剪贴板中没有可粘贴的文件', true); return; }
   const dst = dstDir || state.cwd;
   const norm = (p) => String(p).replace(/[\\/]+$/, '');
   let okCount = 0, lastErr = '';
   const undoItems = [];
   for (const src of clip.paths) {
     if (clip.op === 'cut' && norm(dirOf(src)) === norm(dst)) continue; // 原地剪切粘贴=没动
-    const r = await apiPost(clip.op === 'cut' ? '/api/move' : '/api/copy-in', { src, dstDir: dst }).catch((err) => ({ ok: false, error: err.message }));
+    const r = await apiPost(clip.op === 'cut' ? '/api/move' : '/api/copy-in', { src, dstDir: dst }).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
     if (r.ok) {
       okCount++;
       if (clip.op === 'cut') undoItems.push({ from: src, to: r.path });
       else undoItems.push({ path: r.path, from: src });
-    } else lastErr = r.error || '失败';
+    } else lastErr = friendlyErrorText(r, '失败');
   }
   if (okCount) {
     pushUndo({ type: clip.op === 'cut' ? 'move' : 'copy', items: undoItems, label: clip.op === 'cut' ? '移动' : '复制' });
@@ -3348,7 +3607,8 @@ async function clipPaste(dstDir) {
     await refresh();
     selectVisiblePaths(undoItems.map((it) => it.to || it.path));
   }
-  if (lastErr) toast(lastErr, true);
+  const pasteErrPrefix = clip.op === 'cut' ? '移动失败：' : '粘贴失败：';
+  if (lastErr) toast(pasteErrPrefix + lastErr, true);
   if (clip.op === 'cut') {
     setFileClip(null); // 剪切是一次性的(资源管理器同款)
     paintCutMarks();
@@ -3360,7 +3620,8 @@ function canPasteShortcut() {
 async function shortcutClipboard() {
   let clip = state.fileClip;
   if ((!clip || !clip.paths?.length) && window.fanboxClipboard && window.fanboxClipboard.readFiles) {
-    const r = await window.fanboxClipboard.readFiles().catch((err) => ({ ok: false, paths: [], error: err.message }));
+    const r = await window.fanboxClipboard.readFiles().catch((err) => ({ ok: false, paths: [], error: friendlyErrorText(err) }));
+    if (!r.ok || r.error) return { error: friendlyErrorText(r, '读取失败'), paths: [] };
     if (r.ok && r.paths && r.paths.length) clip = { op: r.op === 'cut' ? 'cut' : 'copy', paths: r.paths, external: true };
   }
   return clip;
@@ -3368,23 +3629,24 @@ async function shortcutClipboard() {
 async function pasteShortcutFromClipboard(dstDir) {
   if (isVirtualLocation() && !dstDir) { toast('请先打开一个磁盘或文件夹再粘贴快捷方式', true); return; }
   const clip = await shortcutClipboard();
-  if (!clip || !clip.paths?.length) return;
+  if (clip && clip.error) { toast('读取剪贴板失败：' + friendlyErrorText(clip), true); return; }
+  if (!clip || !clip.paths?.length) { toast('剪贴板中没有可用于创建快捷方式的文件', true); return; }
   if (clip.op !== 'copy') { toast('剪切状态不能粘贴快捷方式，请先复制目标项', true); return; }
   const dst = dstDir || state.cwd;
-  let fail = 0;
+  let fail = 0, lastErr = '';
   const created = [];
   for (const p of clip.paths) {
-    const r = await apiPost('/api/shortcut', { path: p, dstDir: dst }).catch((err) => ({ error: err.message }));
-    if (r.error || !r.ok) fail++;
+    const r = await apiPost('/api/shortcut', { path: p, dstDir: dst }).catch((err) => ({ error: friendlyErrorText(err) }));
+    if (r.error || !r.ok) { fail++; lastErr = friendlyErrorText(r, '创建快捷方式失败'); }
     else created.push({ target: p, path: r.path, name: r.name || baseOf(r.path), dstDir: dirOf(r.path) });
   }
   if (created.length) {
     pushUndo({ type: 'shortcut', items: created, label: '粘贴快捷方式' });
-    toast(fail ? `已粘贴 ${created.length} 个快捷方式，${fail} 项失败` : `已粘贴 ${created.length} 个快捷方式`);
+    toast(fail ? `已粘贴 ${created.length} 个快捷方式，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已粘贴 ${created.length} 个快捷方式`);
     await refresh();
     selectVisiblePaths(created.map((it) => it.path));
   }
-  if (fail && !created.length) toast('粘贴快捷方式失败', true);
+  if (fail && !created.length) toast('粘贴快捷方式失败：' + (lastErr || '未知错误'), true);
 }
 
 async function doTrash(e) {
@@ -3396,7 +3658,7 @@ async function doTrash(e) {
     if (!ok) return;
   }
   const r = await apiPost('/api/trash-undoable', { path: e.path });
-  if (r.error) { toast('删除失败：' + r.error, true); return; }
+  if (r.error) { toast('删除失败：' + friendlyErrorText(r), true); return; }
   pushUndo({ type: 'trash', items: [trashUndoItemFromResult(e, r)], label: '删除' });
   toast('已移到废纸篓，Ctrl+Z 可恢复');
   if (state.selected === e.path) closePreview();
@@ -3409,7 +3671,7 @@ async function doDeletePermanent(e) {
   const ok = await confirmDialog(`永久删除「${e.name}」？不会进入废纸篓。`);
   if (!ok) return;
   const r = await apiPost('/api/delete', { path: e.path });
-  if (r.error) { toast('永久删除失败：' + r.error, true); return; }
+  if (r.error) { toast('永久删除失败：' + friendlyErrorText(r), true); return; }
   toast('已永久删除');
   if (state.selected === e.path) closePreview();
   state.selected = null;
@@ -3429,7 +3691,7 @@ async function doCreate(type) {
   if (!state.cwd || state.recentMode || state.skillsMode) return;
   const name = type === 'dir' ? uniqueEntryName('新建文件夹') : uniqueEntryName('新建文本文档', '.txt');
   const r = await apiPost('/api/create', { path: state.cwd, name, type });
-  if (r.error) { toast('新建失败：' + r.error, true); return; }
+  if (r.error) { toast('新建失败：' + friendlyErrorText(r), true); return; }
   await refresh();
   const ne = state.entries.find((x) => x.path === r.path);
   if (!ne) { toast(type === 'dir' ? '已新建文件夹' : '已新建文件'); return; }
@@ -3605,7 +3867,7 @@ async function createZipFromEntries(items) {
   if (!items.length) return;
   const dstDir = state.cwd || dirOf(items[0].path);
   const name = items.length === 1 ? `${items[0].name}.zip` : '压缩包.zip';
-  const r = await apiPost('/api/archive/create-zip', { paths: items.map((e) => e.path), dstDir, name }).catch((err) => ({ error: err.message }));
+  const r = await apiPost('/api/archive/create-zip', { paths: items.map((e) => e.path), dstDir, name }).catch((err) => ({ error: friendlyErrorText(err) }));
   if (r.error || !r.ok) { toast('压缩失败：' + (r.error || '未知错误'), true); return; }
   toast(`已压缩为 ${r.name || baseOf(r.path)}`);
   pushUndo({ type: 'archiveCreate', paths: items.map((e) => e.path), dstDir, name, path: r.path });
@@ -3615,24 +3877,24 @@ async function createZipFromEntries(items) {
 async function createShortcutForEntries(items) {
   items = (items || []).filter((e) => e && !e.isDrive);
   if (!items.length) return;
-  let fail = 0;
+  let fail = 0, lastErr = '';
   const created = [];
   for (const e of items) {
-    const r = await apiPost('/api/shortcut', { path: e.path, dstDir: dirOf(e.path) }).catch((err) => ({ error: err.message }));
-    if (r.error || !r.ok) fail++;
+    const r = await apiPost('/api/shortcut', { path: e.path, dstDir: dirOf(e.path) }).catch((err) => ({ error: friendlyErrorText(err) }));
+    if (r.error || !r.ok) { fail++; lastErr = friendlyErrorText(r, '创建快捷方式失败'); }
     else created.push({ target: e.path, path: r.path, name: r.name || baseOf(r.path), dstDir: dirOf(r.path) });
   }
   if (created.length) {
     pushUndo({ type: 'shortcut', items: created, label: '创建快捷方式' });
-    toast(fail ? `已创建 ${created.length} 个快捷方式，${fail} 项失败` : `已创建 ${created.length} 个快捷方式`);
+    toast(fail ? `已创建 ${created.length} 个快捷方式，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已创建 ${created.length} 个快捷方式`);
     await refresh();
     selectVisiblePaths(created.map((it) => it.path));
   }
-  if (fail && !created.length) toast('创建快捷方式失败', true);
+  if (fail && !created.length) toast('创建快捷方式失败：' + (lastErr || '未知错误'), true);
 }
 async function extractArchiveEntry(e) {
   if (!isExtractableArchive(e)) return;
-  const r = await apiPost('/api/archive/extract', { path: e.path }).catch((err) => ({ error: err.message }));
+  const r = await apiPost('/api/archive/extract', { path: e.path }).catch((err) => ({ error: friendlyErrorText(err) }));
   if (r.error || !r.ok) { toast('解压失败：' + (r.error || '未知错误'), true); return; }
   toast(`已解压到 ${r.name || baseOf(r.path)}`);
   pushUndo({ type: 'archiveExtract', archive: e.path, path: r.path, name: r.name || baseOf(r.path) });
@@ -3736,7 +3998,7 @@ function propertiesPanel(items) {
       const row = ov.querySelector('.prop-row[data-prop-key="目标路径"]');
       const code = row && row.querySelector('code');
       if (code) {
-        const value = '读取失败：' + (err.message || err);
+        const value = '读取失败：' + friendlyErrorText(err);
         code.textContent = value;
         code.title = value;
       }
@@ -3750,7 +4012,7 @@ function propertiesPanel(items) {
   $('#prop-copy').onclick = () => copyPaths(items.map((e) => e.path));
   const copyTarget = $('#prop-copy-target');
   if (copyTarget) copyTarget.onclick = async () => {
-    const r = await shortcutTargetInfo(single).catch((err) => ({ ok: false, error: err.message }));
+    const r = await shortcutTargetInfo(single).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
     if (!r.ok || !r.target) { toast('复制目标路径失败：' + (r.error || '未找到快捷方式目标'), true); return; }
     copyPaths([r.target]);
   };
@@ -4125,16 +4387,26 @@ function networkLocationLi() {
   li.appendChild(btn);
   return li;
 }
+function normalizeNetworkLocationInput(raw) {
+  const value = String(raw || '').trim().replace(/^['\"]|['\"]$/g, '');
+  if (!value) return { ok: false, path: '', error: '请输入网络位置路径，例如 \\\\server\\share 或 file://server/share' };
+  if (value.startsWith('\\\\') || /^file:\/\//i.test(value) || /^[A-Za-z]:[\\/]/.test(value)) {
+    return { ok: true, path: value, error: '' };
+  }
+  return { ok: false, path: '', error: '请输入网络位置路径，例如 \\\\server\\share 或 file://server/share' };
+}
 async function addNetworkLocation() {
   const input = await inputDialog('添加网络位置', '', '例如 \\\\server\\share 或 file://server/share');
   if (!input) return;
-  const r = await api('/api/stat?path=' + encodeURIComponent(input)).catch((err) => ({ ok: false, error: err.message }));
-  if (!r || !r.ok) { toast('网络位置不可用：' + ((r && r.error) || '无法访问'), true); return; }
+  const normalized = normalizeNetworkLocationInput(input);
+  if (!normalized.ok) { toast(normalized.error, true); return; }
+  const r = await api('/api/stat?path=' + encodeURIComponent(normalized.path)).catch((err) => ({ ok: false, error: friendlyErrorText(err) }));
+  if (!r || !r.ok) { toast('网络位置不可用：' + friendlyErrorText(r, '无法访问'), true); return; }
   if (!r.isDir) { toast('网络位置必须是文件夹', true); return; }
   if (isFav(r.path)) { toast('这个位置已在收藏里'); return; }
   const name = r.name || baseOf(r.path) || r.path;
-  const saved = await apiPost('/api/favorites', { path: r.path, name, isDir: true }).catch((err) => ({ error: err.message }));
-  if (saved.error) { toast('添加失败：' + saved.error, true); return; }
+  const saved = await apiPost('/api/favorites', { path: r.path, name, isDir: true }).catch((err) => ({ error: friendlyErrorText(err) }));
+  if (saved.error) { toast('添加失败：' + friendlyErrorText(saved), true); return; }
   await loadFavorites();
   toast(`已添加网络位置：${name}`);
 }
@@ -4244,10 +4516,22 @@ function renderRecents() {
   }
 }
 async function openRecent(p) {
-  await navigate(dirOf(p)).catch(() => {});
+  try {
+    await navigate(dirOf(p));
+  } catch (err) {
+    toast('打开最近文件失败：' + friendlyOpenLocationError(err), true);
+    return;
+  }
   const e = state.entries.find((x) => x.path === p);
   if (!e) { toast('文件不在原位置了（可能被移动或删除）', true); return; }
-  if (e.isDir) { navigate(p); return; }
+  if (e.isDir) {
+    try {
+      await navigate(p);
+    } catch (err) {
+      toast('打开最近文件夹失败：' + friendlyOpenLocationError(err), true);
+    }
+    return;
+  }
   recordRecent(p);
   // 翻箱预览不了的二进制 → 系统默认应用；Word/Excel 现在能应用内打开了
   if (e.kind === 'other' && !isOfficeName(e.name)) { openWith(p); return; }
@@ -4255,10 +4539,23 @@ async function openRecent(p) {
   openPreview(e);
   renderFiles();
 }
+function friendlyOpenLocationError(err) {
+  const msg = err && err.message ? String(err.message) : String(err || '');
+  if (!msg) return '未知错误';
+  if (/Failed to fetch|NetworkError|Load failed|timeout|timed out/i.test(msg)) return '访问超时';
+  if (/EACCES|EPERM|permission|access denied|denied/i.test(msg)) return '没有权限访问所在位置';
+  if (/ENOENT|not found|no such file/i.test(msg)) return '所在位置已不存在';
+  return msg;
+}
 async function revealEntryInCurrentApp(e) {
   if (!e || !e.path) return;
   const targetDir = dirOf(e.path);
-  await navigate(targetDir).catch(() => {});
+  try {
+    await navigate(targetDir);
+  } catch (err) {
+    toast('打开所在位置失败：' + friendlyOpenLocationError(err), true);
+    return;
+  }
   const ok = selectVisiblePaths([e.path]);
   if (!ok) { toast('文件不在原位置了（可能被移动或删除）', true); return; }
   toast('已打开所在位置');
@@ -4467,14 +4764,22 @@ function maybeShowGuide() {
     <p>vibe coding 的驾驶舱——找文件、跑 agent、看它改、随手改，都在一个窗口：</p>
     <ul>
       <li><b>${MOD}K</b> 全局搜文件和文件夹；<b>${MOD}↵</b> 把项目直接在编辑器整包打开；<code>内容:关键词</code> 搜文件里的字</li>
-      <li>顶部 <b>终端</b> 按钮开内嵌终端跑 Claude Code 等 agent；<b>把文件/文件夹拖进终端</b> 即插入路径喂给它当上下文</li>
+      <li>顶部 <b>终端</b> 按钮开内嵌终端跑 Claude Code 等 agent；<b>把文件/文件夹拖进终端</b> 只插入路径喂给它当上下文</li>
       <li><b>单击</b> 预览，<b>双击</b> 系统打开；预览里 <b>编辑</b> md 走所见即所得、<b>编辑图片</b> 可标注/打码/转格式</li>
       <li>agent 改了哪些文件，列表实时高亮「改·N」，不用切窗口盯着看</li>
     </ul>
     <button id="guide-ok">开始使用</button>
   </div>`;
   document.body.appendChild(ov);
-  $('#guide-ok').onclick = () => { localStorage.setItem('fb_guided', '1'); ov.remove(); };
+  const closeGuide = () => {
+    localStorage.setItem('fb_guided', '1');
+    document.removeEventListener('keydown', onGuideKey, true);
+    ov.remove();
+  };
+  function onGuideKey(ev) { if (ev.key === 'Escape') { ev.preventDefault(); closeGuide(); } }
+  $('#guide-ok').onclick = closeGuide;
+  ov.onclick = (ev) => { if (ev.target === ov) closeGuide(); };
+  document.addEventListener('keydown', onGuideKey, true);
 }
 
 // ---------- 预览面板拖拽调宽 ----------
@@ -4482,21 +4787,22 @@ function bindResizer() {
   const handle = $('#preview-resizer');
   let dragging = false;
   handle.addEventListener('mousedown', (e) => { dragging = true; e.preventDefault(); handle.classList.add('dragging'); document.body.style.userSelect = 'none'; });
+  handle.addEventListener('keydown', handlePreviewResizerKey);
   window.addEventListener('mousemove', (e) => {
     if (!dragging) return;
     const fm = $('#filemgmt').getBoundingClientRect();
+    let raw;
     if (term.dock === 'right') { // 预览在文件区下方 → 纵向拖
-      state.previewH = Math.round(Math.min(fm.height - 120, Math.max(140, fm.bottom - e.clientY)));
+      raw = fm.bottom - e.clientY;
     } else { // 预览在文件区右侧 → 横向拖
-      state.previewW = Math.round(Math.min(fm.width - 220, Math.max(260, fm.right - e.clientX)));
+      raw = fm.right - e.clientX;
     }
-    applyPreviewSize();
+    applyPreviewResizeValue(raw, false);
   });
   window.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false; handle.classList.remove('dragging'); document.body.style.userSelect = '';
-    localStorage.setItem('fb_preview_w', state.previewW);
-    localStorage.setItem('fb_preview_h', state.previewH || 340);
+    applyPreviewResizeValue(null, true);
   });
 }
 
@@ -4639,7 +4945,13 @@ function bindEvents() {
   });
   // 全局兜底：文件拖到窗口其它区域松手时，阻止 Electron 导航到 file:// 顶掉整个界面
   window.addEventListener('dragover', (e) => e.preventDefault());
-  window.addEventListener('drop', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => { e.preventDefault(); clearFileDropHints(); });
+  window.addEventListener('dragend', clearFileDropHints);
+  window.addEventListener('pointerup', clearFileDropHints, true);
+  window.addEventListener('pointercancel', clearFileDropHints, true);
+  window.addEventListener('mouseup', clearFileDropHints, true);
+  window.addEventListener('blur', clearFileDropHints);
+  document.addEventListener('visibilitychange', clearFileDropHints);
   // 文件区空白处双击/右键 → 新建菜单（#7：右键空白是更普遍的肌肉记忆）
   const blankMenu = (e) => {
     if (e.target.closest('.item') || e.target.closest('.row')) return; // 条目自身的菜单不抢
@@ -4662,28 +4974,24 @@ function bindEvents() {
     return null;
   };
   const dropFolderEl = (e) => e.target.closest('.item.is-dir, .row.is-dir');
-  const clearDropHints = () => {
-    fileArea.classList.remove('drop-in');
-    fileArea.querySelectorAll('.drop-target').forEach((x) => x.classList.remove('drop-target'));
-  };
   fileArea.addEventListener('dragover', (e) => {
     const kind = dragKind(e);
     if (!kind || state.skillsMode || state.recentMode) return;
     e.preventDefault(); e.stopPropagation();
     e.dataTransfer.dropEffect = kind === 'external' || e.ctrlKey || e.metaKey ? 'copy' : 'move';
-    clearDropHints();
+    clearFileDropHints();
     const folder = dropFolderEl(e);
     if (folder) folder.classList.add('drop-target');
     else fileArea.classList.add('drop-in');
   });
-  fileArea.addEventListener('dragleave', (e) => { if (!fileArea.contains(e.relatedTarget)) clearDropHints(); });
+  fileArea.addEventListener('dragleave', (e) => { if (!fileArea.contains(e.relatedTarget)) clearFileDropHints(); });
   fileArea.addEventListener('drop', async (e) => {
     const kind = dragKind(e);
     if (!kind || state.skillsMode || state.recentMode) return;
     e.preventDefault(); e.stopPropagation();
     const folder = dropFolderEl(e);
     const dstDir = folder ? folder.dataset.path : state.cwd;
-    clearDropHints();
+    clearFileDropHints();
     if (kind === 'internal') {
       await dropInternalPathsToDir(internalDragPaths(e.dataTransfer), dstDir, e.ctrlKey || e.metaKey);
       return;
@@ -4771,6 +5079,7 @@ function bindEvents() {
     if (!inInput && ((e.ctrlKey && (e.key === 'l' || e.key === 'L')) || (e.altKey && (e.key === 'd' || e.key === 'D')) || e.key === 'F4')) {
       e.preventDefault(); beginAddressEdit(); return;
     }
+    if (e.key === 'Escape') clearFileDropHints();
     // 输入框里按 Esc 先退出输入，别越级把预览关掉
     if (e.key === 'Escape' && inInput) { document.activeElement.blur(); return; }
     if (e.key === 'Escape' && !inInput && clearFileFilterFromKeyboard()) return;
@@ -4964,6 +5273,17 @@ function applyTheme(skin, rerender = true) {
 // agent「等你拍板」界面特征（claude code 2.1.x / codex 0.13x 实测文案，宁缺勿滥：
 // 不命中只是退化成「任务完成」标题，不会漏响）
 const TERM_ASK_RE = /(Do you want to (proceed|continue|make this edit|allow|use this)|Would you like to proceed|Ready to code\?|created or one you trust\?|tell (Claude|Codex) what to do differently|Yes, and don't ask again|Allow Codex to (run|apply|create)|Codex wants to|[❯›][ \t]*1\.[ \t]*Yes)/;
+function terminalFailureMessage(sess) {
+  const reason = (sess && sess.error) || '未知错误';
+  return '终端启动失败：' + reason;
+}
+function terminalRespawnFailureMessage(sess) {
+  const reason = (sess && sess.error) || '未知错误';
+  return '终端重开失败：' + reason;
+}
+function terminalUnavailableMessage() {
+  return '内嵌终端不可用，请使用桌面版或检查终端组件';
+}
 const term = {
   sessions: [], seq: 0, active: null, maximized: false,
   dock: localStorage.getItem('fb_term_dock') || 'bottom',
@@ -5074,14 +5394,14 @@ const term = {
     }
     if (!sess) sess = await this.openInDir(state.cwd); // 等 spawn 完，拿确切 session 写入
     if (sess && !sess.dead) { this.input(sess.id, cmd + '\r'); sess.xterm.focus(); toast('已在终端启动 ' + cmd); }
-    else toast('终端启动失败', true);
+    else toast(terminalFailureMessage(sess), true);
   },
   // 在指定目录新开标签跑命令（续会话/发版等）：不复用别处的空闲 shell，目录必须对
   async runInDir(dir, cmd, msg) {
     if (!this.available()) { openWith(dir, 'terminal'); return; }
     const sess = await this.openInDir(dir);
     if (sess && !sess.dead) { this.input(sess.id, cmd + '\r'); sess.xterm.focus(); toast(msg || '已在终端启动'); }
-    else toast('终端启动失败', true);
+    else toast(terminalFailureMessage(sess), true);
   },
   // 该会话前台是不是裸 shell？判断不了一律按「不是」处理——宁可新开标签，也不往运行中的程序里打字
   async isPlainShell(s) {
@@ -5094,7 +5414,7 @@ const term = {
   },
   // 把预览里选中的文字作为「上下文」喂给终端 agent：带文件出处 + 围栏，bracketed paste 防逐行误提交
   sendContext(text, srcPath) {
-    if (!this.available()) { toast('内嵌终端不可用（网页版没有终端）', true); return; }
+    if (!this.available()) { toast(terminalUnavailableMessage(), true); return; }
     const wasHidden = $('#terminal-panel').classList.contains('hidden');
     if (wasHidden) this.open();
     const rel = srcPath ? srcPath.replace(state.home, '~') : '';
@@ -5270,8 +5590,8 @@ const term = {
     this.activate(id);
     updateWatches(); // 新终端的项目目录也纳入监听
     const r = await window.fanboxPty.spawn({ id, cwd: startDir, cols: xterm.cols, rows: xterm.rows });
-    if (!r.ok) { sess.dead = true; xterm.write('\r\n  \x1b[31m终端启动失败：' + (r.error || '') + '\x1b[0m\r\n'); }
-    else sess.cwd = r.cwd || startDir; // 末尾 renderTabs 统一带上 cwd 重画
+    if (!r.ok) { sess.dead = true; sess.error = r.error || '未知错误'; xterm.write('\r\n  \x1b[31m终端启动失败：' + sess.error + '\x1b[0m\r\n'); }
+    else { sess.error = ''; sess.cwd = r.cwd || startDir; } // 末尾 renderTabs 统一带上 cwd 重画
     xterm.onData((d) => {
       if (sess.dead) { if (d === '\r' || d === '\n') this.respawn(sess); return; } // 进程退出后回车真重开
       this.input(id, d);
@@ -5372,14 +5692,14 @@ const term = {
           const cwd0 = (sess0 && (sess0.cwd || sess0.startDir)) || state.cwd || '';
           // 验证结果按 (cwd, cand, tail) 缓存：provideLinks 在鼠标移动时反复触发，别反复打接口
           this._vCache = this._vCache || new Map();
-          const need = r2.filter((x) => !this._vCache.has(cwd0 + ' ' + x.cand + ' ' + x.tail));
+          const need = r2.filter((x) => !this._vCache.has(cwd0 + '\u001f' + x.cand + '\u001f' + x.tail));
           const apply = () => {
-            r2.forEach((x) => { if (this._vCache.get(cwd0 + ' ' + x.cand + ' ' + x.tail)) push(x.s, x.e, x.cand, x.tail); });
+            r2.forEach((x) => { if (this._vCache.get(cwd0 + '\u001f' + x.cand + '\u001f' + x.tail)) push(x.s, x.e, x.cand, x.tail); });
             finish();
           };
           if (!need.length) { apply(); return; }
           apiPost('/api/term-verify', { cwd: cwd0, items: need.map((x) => ({ cand: x.cand, tail: x.tail })) }).then((res) => {
-            need.forEach((x, i) => this._vCache.set(cwd0 + ' ' + x.cand + ' ' + x.tail, !!(res.results && res.results[i])));
+            need.forEach((x, i) => this._vCache.set(cwd0 + '\u001f' + x.cand + '\u001f' + x.tail, !!(res.results && res.results[i])));
             if (this._vCache.size > 600) { for (const k of this._vCache.keys()) { this._vCache.delete(k); if (this._vCache.size <= 400) break; } }
             apply();
           }).catch(() => finish()); // 验证不可用：宁可不划线，不要误标
@@ -5393,8 +5713,15 @@ const term = {
     sess.dead = false;
     sess.xterm.reset(); // 清掉死亡残留，新 shell 提示符不和旧画面叠在一起
     const r = await window.fanboxPty.spawn({ id: sess.id, cwd: sess.startDir || state.cwd, cols: sess.xterm.cols, rows: sess.xterm.rows });
-    if (!r.ok) { sess.dead = true; sess.xterm.write('\x1b[31m重开失败：' + (r.error || '') + '\x1b[0m\r\n'); }
-    else sess.cwd = r.cwd || sess.startDir;
+    if (!r.ok) {
+      sess.dead = true;
+      sess.error = r.error || '未知错误';
+      sess.xterm.write('\x1b[31m重开失败：' + sess.error + '\x1b[0m\r\n');
+      toast(terminalRespawnFailureMessage(sess), true);
+    } else {
+      sess.error = '';
+      sess.cwd = r.cwd || sess.startDir;
+    }
   },
   activate(id) {
     this.active = id;
@@ -5751,7 +6078,7 @@ const skillsView = {
         if (act.dataset.act === 'toggle') {
           const r = await apiPost('/api/skills/toggle', { dir, enable: it.disabled });
           if (r.ok) { toast(it.disabled ? '已启用 ' + it.name : '已停用 ' + it.name + '（文件还在，随时可启用）'); this.reload(); }
-          else toast('操作失败：' + (r.error || ''), true);
+          else toast('操作失败：' + (r.error || '未知错误'), true);
         } else if (act.dataset.act === 'invoke') {
           invokeSkillInTerm(it.name);
         } else if (act.dataset.act === 'reveal') {
@@ -5765,7 +6092,7 @@ const skillsView = {
           if (!ok) return;
           const r = await apiPost('/api/skills/trash', { dir });
           if (r.ok) { toast('已移到废纸篓'); this.open.delete(dir); this.reload(); }
-          else toast('删除失败：' + (r.error || ''), true);
+          else toast('删除失败：' + (r.error || '未知错误'), true);
         }
         return;
       }
@@ -5786,7 +6113,7 @@ const skillsView = {
 
 // 把 skill 注入当前终端：claude 会话用 /name，codex 会话用 $name；裸 shell 提示先启动 agent
 async function invokeSkillInTerm(name) {
-  if (typeof term === 'undefined' || !term.available()) { toast('需要桌面版的内嵌终端', true); return; }
+  if (typeof term === 'undefined' || !term.available()) { toast(terminalUnavailableMessage(), true); return; }
   if ($('#terminal-panel').classList.contains('hidden')) term.open();
   const s = term.sessions.find((x) => x.id === term.active);
   if (!s || s.dead) { toast('先开一个终端并启动 agent', true); return; }
@@ -5928,11 +6255,26 @@ function recordChange(dir, filename) {
 function renderChangesBadge() {
   const b = $('#changes-badge'); if (!b) return;
   b.classList.toggle('hidden', state.changeLog.length === 0);
+  const btn = $('#btn-changes');
+  if (!btn) return;
+  if (!state.changeLog.length) {
+    b.textContent = '';
+    btn.title = '本会话变更：暂无 AI 文件输出';
+    return;
+  }
+  b.textContent = state.changeLog.length > 99 ? '99+' : String(state.changeLog.length);
+  btn.title = `本会话变更 · ${state.changeLog.length} 个文件，最新：${state.changeLog[0].name}。点击回看 / 打开最新`;
 }
 function fmtClock(ms) { const d = new Date(ms); const p = (x) => String(x).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+async function openChangedPath(p) {
+  if (!p) return;
+  await navigate(dirOf(p));
+  const e = state.entries.find((x) => x.path === p) || { path: p, name: baseOf(p), kind: kindFromName(p), isDir: false };
+  applySelection(p); openPreview(e); recordRecent(p);
+}
 function toggleChangesPanel() {
   const existing = $('#changes-pop');
-  if (existing) { existing.remove(); return; }
+  if (existing) { if (existing._cleanup) existing._cleanup(); else existing.remove(); return; }
   const pop = document.createElement('div');
   pop.id = 'changes-pop';
   pop.className = 'changes-pop';
@@ -5941,34 +6283,52 @@ function toggleChangesPanel() {
   } else {
     const rows = state.changeLog.slice(0, 60).map((c) => {
       const inRepoHint = '';
-      return `<div class="cp-row" data-path="${escapeHtml(c.path)}">
+      return `<div class="cp-row" data-path="${escapeHtml(c.path)}" title="${escapeHtml(c.path)}" tabindex="0" role="button">
         <span class="cp-name">${escapeHtml(c.name)}${c.count > 1 ? ` <em>×${c.count}</em>` : ''}</span>
         <span class="cp-dir">${escapeHtml(c.dir.replace(state.home, '~'))}</span>
         <span class="cp-time">${fmtClock(c.ts)}</span>
+        <button type="button" class="cp-copy-one" title="复制路径">复制</button>
       </div>`;
     }).join('');
-    pop.innerHTML = `<div class="cp-head">本会话变更 · ${state.changeLog.length}<span class="cp-head-btns"><button id="cp-replay" class="ghost-btn">▶ 回放</button><button id="cp-clear" class="ghost-btn">清空</button></span></div><div class="cp-list">${rows}</div>`;
+    pop.innerHTML = `<div class="cp-head">本会话变更 · ${state.changeLog.length}<span class="cp-head-btns"><button id="cp-open-latest" class="ghost-btn">打开最新</button><button id="cp-copy-all" class="ghost-btn">复制全部路径</button><button id="cp-replay" class="ghost-btn">▶ 回放</button><button id="cp-clear" class="ghost-btn">清空</button></span></div><div class="cp-list">${rows}</div>`;
   }
   document.body.appendChild(pop);
   const btn = $('#btn-changes'); const r = btn.getBoundingClientRect();
   pop.style.top = (r.bottom + 6) + 'px';
-  pop.style.right = (window.innerWidth - r.right) + 'px';
-  const clear = $('#cp-clear'); if (clear) clear.onclick = (ev) => { ev.stopPropagation(); state.changeLog = []; state.changeTimeline = []; renderChangesBadge(); pop.remove(); };
-  const rep = $('#cp-replay'); if (rep) rep.onclick = (ev) => { ev.stopPropagation(); pop.remove(); openReplay(); };
+  pop.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+  const closePop = () => {
+    document.removeEventListener('click', onOutsideClick);
+    document.removeEventListener('keydown', onPopKey, true);
+    pop.remove();
+  };
+  function onPopKey(ev) {
+    if (ev.defaultPrevented) return;
+    if (ev.key === 'Escape' && !document.querySelector('.input-overlay')) { ev.preventDefault(); closePop(); }
+  }
+  function onOutsideClick(ev) {
+    if (!ev.target.closest('#changes-pop') && !ev.target.closest('#btn-changes') && !ev.target.closest('.input-overlay')) closePop();
+  }
+  pop._cleanup = closePop;
+  const clear = $('#cp-clear'); if (clear) clear.onclick = async (ev) => { ev.stopPropagation(); const ok = await confirmDialog('清空本会话变更记录？这只会清掉面板记录，不会删除文件。'); if (!ok) return; state.changeLog = []; state.changeTimeline = []; renderChangesBadge(); closePop(); };
+  const openLatest = $('#cp-open-latest'); if (openLatest) openLatest.onclick = (ev) => { ev.stopPropagation(); closePop(); openChangedPath(state.changeLog[0].path).catch((err) => toast('打开最新输出失败：' + friendlyErrorText(err), true)); };
+  const copyAll = $('#cp-copy-all'); if (copyAll) copyAll.onclick = (ev) => { ev.stopPropagation(); const paths = state.changeLog.map((c) => c.path).filter(Boolean); copyPaths(paths); };
+  const rep = $('#cp-replay'); if (rep) rep.onclick = (ev) => { ev.stopPropagation(); closePop(); openReplay(); };
   pop.querySelectorAll('.cp-row').forEach((row) => {
-    row.onclick = async () => {
-      const p = row.dataset.path;
-      pop.remove();
-      await navigate(dirOf(p));
-      const e = state.entries.find((x) => x.path === p) || { path: p, name: baseOf(p), kind: kindFromName(p), isDir: false };
-      applySelection(p); openPreview(e); recordRecent(p);
+    row.onclick = async (ev) => {
+      const copyOne = ev.target.closest('.cp-copy-one');
+      if (copyOne) { ev.stopPropagation(); copyPath(row.dataset.path); return; }
+      closePop();
+      openChangedPath(row.dataset.path).catch((err) => toast('打开变更文件失败：' + friendlyErrorText(err), true));
+    };
+    row.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); row.click(); }
     };
   });
   // 点其它地方关闭
   setTimeout(() => {
-    const close = (ev) => { if (!ev.target.closest('#changes-pop') && !ev.target.closest('#btn-changes')) { pop.remove(); document.removeEventListener('click', close); } };
-    document.addEventListener('click', close);
+    document.addEventListener('click', onOutsideClick);
   }, 0);
+  document.addEventListener('keydown', onPopKey, true);
 }
 // WOW2 会话回放：像刷视频一样拖时间轴，重现这段时间 agent 一步步改了哪些文件
 function openReplay() {
@@ -6151,7 +6511,7 @@ if (window.fanboxFs) {
 
 // ---------- AI 对话面板 ----------
 // 终端的「无门槛替身」：右侧 dock 在 对话/终端 两种模式间切换。
-// 对话模式走 /api/ai/* 后端（多家模型 + 文件工具 agent 循环），网页版没有内嵌终端时也可用。
+// 对话模式走 /api/ai/* 后端（多家模型 + 文件工具 agent 循环），即使内嵌终端不可用也可用。
 function setDockMode(mode) {
   const panel = $('#terminal-panel');
   const isChat = mode === 'chat';
@@ -6173,6 +6533,17 @@ function aiToolDetail(name, args) {
   const a = args || {};
   return String(a.file_path || a.path || a.command || a.pattern || a.query || a.url || a.description || a.prompt || '').slice(0, 140);
 }
+function aiToolDoneLabel(name) {
+  switch (name) {
+    case 'Write': return '已生成文件';
+    case 'Edit': return '已修改文件';
+    case 'MultiEdit': return '已批量修改';
+    case 'NotebookEdit': return '已编辑笔记本';
+    case 'Read': return '已读取文件';
+    case 'Bash': return '命令已完成';
+    default: return '已完成：' + (AI_TOOL_LABEL[name] || name);
+  }
+}
 function chatToolPathFromArgs(name, args = {}) {
   const p = args.file_path || args.path || '';
   if (!p) return '';
@@ -6186,7 +6557,7 @@ function renderChatToolLine(ev) {
   line.dataset.tool = ev.name;
   const label = AI_TOOL_LABEL[ev.name] || escapeHtml(ev.name);
   const detail = escapeHtml(String(aiToolDetail(ev.name, ev.args)).slice(0, 120));
-  line.innerHTML = `<span class="ct-spin">⏳</span> ${label} <code>${detail}</code>`;
+  line.innerHTML = `<span class="ct-state ct-spin">⏳</span><span class="ct-label">${label}</span><code>${detail}</code>`;
   const toolPath = chatToolPathFromArgs(ev.name, ev.args);
   if (toolPath) {
     line.dataset.path = normalizeChatPath(toolPath);
@@ -6262,14 +6633,207 @@ function clearChatAttachments() {
   chat.renderChips();
   toast('已清空对话附件');
 }
+function copyChatAttachments() {
+  const paths = (chat.attachments || []).filter(Boolean);
+  if (paths.length) copyPaths(paths);
+}
+function promptForAttachmentInstruction() {
+  $('#chat-input')?.focus();
+  toast('已附加路径，请补一句要 AI 做什么', true);
+}
+function promptForSelectedContextInstruction() {
+  $('#chat-input')?.focus();
+  toast('当前选中文件不会自动发送，请输入任务并点“附加选中”', true);
+}
+function promptForUnattachedSelectedContext() {
+  $('#chat-input')?.focus();
+  toast('当前选中文件不会自动发送；请先点“附加选中”，或取消选中后再发送纯文本', true);
+}
+function promptForBusyChat() {
+  $('#chat-input')?.focus();
+  toast('当前对话正在运行，可先停止或切到其它会话', true);
+}
+function friendlyChatError(message) {
+  const raw = String(message || '').trim();
+  const lower = raw.toLowerCase();
+  if (!raw) return 'AI 服务暂时没有响应，请检查网络、本机中转或稍后重试';
+  if (/已停止/.test(raw)) return '已停止';
+  if (/401|unauthorized|authentication|invalid api key|api key|auth_token|x-api-key|无效|未授权/i.test(raw)) {
+    return 'AI 认证失败，请检查 API key 或重新保存服务商设置';
+  }
+  if (/429|rate.?limit|too many requests|quota|insufficient_quota|额度|限流/i.test(raw)) {
+    return 'AI 服务限流或额度不足，请稍后重试或检查额度';
+  }
+  if (/model.+not found|not found.+model|model_not_found|404|模型不存在|模型不可用/i.test(raw)) {
+    return '模型不可用，请检查 AI 设置里的模型名称';
+  }
+  if (/relay:|failed to fetch|fetch failed|networkerror|load failed|econnrefused|econnreset|etimedout|timeout|socket hang up|bad gateway|service unavailable|upstream|连接中断/i.test(lower)) {
+    return 'AI 服务暂时没有响应，请检查网络、本机中转或稍后重试';
+  }
+  if (/direct api \d+|anthropic api \d+|api \d+|http \d+/i.test(raw)) {
+    return 'AI 服务返回异常，请稍后重试；如果持续出现，请检查服务商设置';
+  }
+  return raw;
+}
+function friendlyChatHttpError(status, statusText, detail) {
+  return friendlyChatError(`HTTP ${status}${statusText ? ` ${statusText}` : ''}${detail ? ` ${detail}` : ''}`);
+}
+function friendlyAiSettingsError(err) {
+  const raw = err && err.message ? String(err.message) : String(err || '');
+  if (/failed to fetch|fetch failed|network|econnrefused|etimedout|timeout|连接|断开|无法连接/i.test(raw)) {
+    return 'AI 设置暂时无法连接，请稍后重试';
+  }
+  if (/401|unauthorized|forbidden|invalid api key|api key|auth|认证|鉴权|密钥/i.test(raw)) {
+    return 'AI 认证失败，请检查 API key';
+  }
+  if (/429|rate.?limit|quota|insufficient_quota|too many requests|限流|额度/i.test(raw)) {
+    return 'AI 服务限流或额度不足，请稍后重试';
+  }
+  if (/model.+not found|not found.+model|model_not_found|模型不存在|模型不可用/i.test(raw)) {
+    return '模型不可用，请检查模型名称';
+  }
+  return 'AI 设置返回异常，请稍后重试';
+}
+function appendChatErrorActions(container, rawMessage, friendlyMessage, retry) {
+  const raw = String(rawMessage || '');
+  const friendly = String(friendlyMessage || '');
+  const actions = document.createElement('div');
+  actions.className = 'chat-error-actions';
+  if (/认证失败|API key|模型不可用|模型名称/.test(friendly) || /401|unauthorized|api key|model/i.test(raw)) {
+    const settings = document.createElement('button');
+    settings.type = 'button';
+    settings.className = 'chat-error-action';
+    settings.textContent = '打开设置';
+    settings.onclick = () => aiSettings.open();
+    actions.appendChild(settings);
+  }
+  if (/暂时没有响应|限流|额度不足/.test(friendly)) {
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.className = 'chat-error-action';
+    retryBtn.textContent = '重试';
+    retryBtn.onclick = () => retry();
+    actions.appendChild(retryBtn);
+  }
+  if (actions.childNodes.length) container.appendChild(actions);
+}
+function aiProviderUsability(active, provider) {
+  if (!provider) return { ready: true, reason: '' };
+  if (active !== 'claude' && !provider.hasKey) return { ready: false, reason: '还没配置 API key' };
+  if (active === 'custom' && !String(provider.baseUrl || '').trim()) return { ready: false, reason: '需要填写 Base URL' };
+  if (!String(provider.model || '').trim()) return { ready: false, reason: '还没选择模型' };
+  return { ready: true, reason: '' };
+}
+function promptForMissingProviderKey() {
+  const label = chat.providerUnavailableLabel || chat.providerMissingKeyLabel || '当前服务商';
+  const reason = chat.providerUnavailableReason || '还没配置 API key';
+  aiSettings.open();
+  toast(`${label} ${reason}，请先在设置里补齐`, true);
+}
 function renderSentAttachmentSummary(paths) {
   const at = document.createElement('div');
   at.className = 'chat-user-atts';
+  const cleanPaths = (paths || []).filter(Boolean);
   at.append('📎 ');
-  (paths || []).forEach((p) => {
+  if (cleanPaths.length > 1) {
+    const copyAll = document.createElement('button');
+    copyAll.type = 'button';
+    copyAll.className = 'chat-user-atts-copy-all';
+    copyAll.textContent = '复制全部路径';
+    copyAll.onclick = () => copyPaths(cleanPaths);
+    at.appendChild(copyAll);
+  }
+  cleanPaths.forEach((p) => {
     at.appendChild(chatPathActionNode(p));
   });
   return at;
+}
+function updateAssistantCopyActionState(btn, getText) {
+  if (!btn) return;
+  const hasText = !!String(getText ? getText() : '').trim();
+  btn.disabled = !hasText;
+  btn.title = hasText ? '复制这条 AI 回复' : '回复生成后可复制';
+}
+function appendAssistantCopyAction(container, getText) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'chat-copy-answer';
+  btn.textContent = '复制回复';
+  btn.title = '回复生成后可复制';
+  btn.onclick = (ev) => {
+    ev.stopPropagation();
+    const text = String(getText() || '');
+    if (!text.trim()) { toast('这条回复还没有可复制内容', true); return; }
+    copyText(text, '已复制回复');
+  };
+  updateAssistantCopyActionState(btn, getText);
+  container.appendChild(btn);
+  return btn;
+}
+function enhanceChatCodeBlocks(root) {
+  if (!root) return;
+  root.querySelectorAll('pre').forEach((pre) => {
+    if (pre.dataset.copyEnhanced === '1') return;
+    const code = pre.querySelector('code');
+    if (!code) return;
+    pre.dataset.copyEnhanced = '1';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-code-copy';
+    btn.textContent = '复制代码';
+    btn.title = '复制这个代码块';
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      copyText(code.innerText || code.textContent || '', '已复制代码块');
+    };
+    pre.appendChild(btn);
+    if (term && term.available && term.available()) {
+      const termBtn = document.createElement('button');
+      termBtn.type = 'button';
+      termBtn.className = 'chat-code-send-term';
+      termBtn.textContent = '发到终端';
+      termBtn.title = '发送到内嵌终端输入区，确认后再回车';
+      termBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        term.sendContext(code.innerText || code.textContent || '', 'AI 回复代码块');
+        toast('已发到终端，确认后再回车');
+      };
+      pre.appendChild(termBtn);
+    }
+  });
+}
+function chatTableToTsv(table) {
+  const rows = [...(table ? table.querySelectorAll('tr') : [])];
+  return rows.map((row) => [...row.children]
+    .map((cell) => String(cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim())
+    .join('\t')).join('\n');
+}
+function enhanceChatTables(root) {
+  if (!root) return;
+  root.querySelectorAll('table').forEach((table) => {
+    if (table.dataset.copyEnhanced === '1') return;
+    table.dataset.copyEnhanced = '1';
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-table-wrap';
+    table.parentNode.insertBefore(wrap, table);
+    wrap.appendChild(table);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-table-copy';
+    btn.textContent = '复制表格';
+    btn.title = '复制为制表符分隔文本，可直接粘到 Excel';
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      copyText(chatTableToTsv(table), '已复制表格');
+    };
+    wrap.appendChild(btn);
+  });
+}
+function chatContextTextNode(html) {
+  const span = document.createElement('span');
+  span.className = 'chat-context-text';
+  span.innerHTML = html;
+  return span;
 }
 function refreshChatComposerContext() {
   const hint = $('#chat-context-hint');
@@ -6282,18 +6846,23 @@ function refreshChatComposerContext() {
   hint.replaceChildren();
   if (attachments.length) {
     const names = attachments.slice(0, 3).map((p) => baseOf(p)).join('、');
-    hint.innerHTML = `已附加 <strong>${attachments.length}</strong> 个路径：${escapeHtml(names)}${attachments.length > 3 ? ' 等' : ''}`;
+    hint.appendChild(chatContextTextNode(`已附加 <strong>${attachments.length}</strong> 个路径：${escapeHtml(names)}${attachments.length > 3 ? ' 等' : ''}。请补一句要 AI 做什么，再发送。`));
     const clear = document.createElement('button');
     clear.type = 'button';
     clear.className = 'chat-clear-attachments';
     clear.textContent = '清空附件';
     clear.onclick = clearChatAttachments;
-    hint.append(' ', clear);
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'chat-copy-attachments';
+    copy.textContent = attachments.length > 1 ? '复制全部路径' : '复制路径';
+    copy.onclick = copyChatAttachments;
+    hint.append(' ', copy, clear);
     return;
   }
   if (selected.length) {
     const names = selected.slice(0, 3).map((p) => baseOf(p)).join('、');
-    hint.innerHTML = `当前选中 <strong>${selected.length}</strong> 个文件/文件夹：${escapeHtml(names)}${selected.length > 3 ? ' 等' : ''}。普通对话需附加路径，任务模板会自动使用选中文件。`;
+    hint.appendChild(chatContextTextNode(`当前选中 <strong>${selected.length}</strong> 个文件/文件夹：${escapeHtml(names)}${selected.length > 3 ? ' 等' : ''}。普通对话需附加路径，任务模板会自动使用选中文件。`));
     const attach = document.createElement('button');
     attach.type = 'button';
     attach.className = 'chat-use-selected';
@@ -6344,48 +6913,153 @@ function refreshTemplateAttachmentContextSummary() {
   const hint = templateAttachmentContextSummary();
   if (hint) host.appendChild(hint);
 }
+function templateMatchesQuery(t, q) {
+  const needle = String(q || '').trim().toLocaleLowerCase('zh');
+  if (!needle) return true;
+  const fields = (t.fields || []).map((f) => `${f.label || ''} ${f.placeholder || ''}`).join(' ');
+  const haystack = [
+    t.title,
+    t.desc,
+    t.dept,
+    fields,
+    t.prompt,
+  ].join(' ').toLocaleLowerCase('zh');
+  return haystack.includes(needle);
+}
 const tpl = {
   data: null,
   dept: localStorage.getItem('fb_tpl_dept') || '通用',
+  q: '',
   async load() {
     if (this.data) return this.data;
     try { this.data = await api('/api/ai/templates'); } catch { this.data = { templates: [] }; }
     return this.data;
   },
   clear() { const el = $('#tpl-area'); if (el) el.remove(); },
+  clearSearch(box) {
+    this.q = '';
+    this.renderPicker(box);
+    const refocusSearch = () => {
+      const search = box.querySelector('.tpl-search');
+      if (search) {
+        search.focus({ preventScroll: true });
+        search.setSelectionRange(search.value.length, search.value.length);
+      }
+    };
+    refocusSearch();
+    requestAnimationFrame(refocusSearch);
+  },
   async showPicker() {
     await this.load();
     this.clear();
     if (!this.data.templates || !this.data.templates.length) return;
+    this.q = '';
+    localStorage.removeItem('fb_tpl_q');
     const box = document.createElement('div');
     box.id = 'tpl-area';
     $('#chat-msgs').appendChild(box);
     this.renderPicker(box);
   },
-  renderPicker(box) {
+  renderPicker(box, opts = {}) {
     const has = (d) => this.data.templates.some((t) => t.dept === d);
     const depts = ['全部', ...(this.data.departments || []).filter(has)];
+    const templateDepartmentCount = (d) => {
+      if (d === '全部') return this.data.templates.length;
+      return this.data.templates.filter((t) => t.dept === d).length;
+    };
     if (!depts.includes(this.dept)) this.dept = depts[1] || '全部';
     // 选部门 = 该部门专属 + 通用（员工视角两类都用得上）；选「全部」看全部
-    const list = this.data.templates.filter((t) => this.dept === '全部' || t.dept === this.dept || t.dept === '通用');
-    box.innerHTML = '<div class="tpl-head">任务模板 <span class="tpl-sub">选卡片 → 选/拖文件 → 填一两句 → 开工</span></div>';
+    const pool = this.q ? this.data.templates : this.data.templates.filter((t) => this.dept === '全部' || t.dept === this.dept || t.dept === '通用');
+    const list = pool.filter((t) => templateMatchesQuery(t, this.q));
+    box.innerHTML = '<div class="tpl-head">任务模板 <span class="tpl-sub">选卡片 → 选文件/拖路径 → 填一两句 → 开工</span></div>';
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'tpl-search';
+    search.placeholder = '搜索模板 / 部门 / 关键词';
+    search.value = this.q;
+    search.setAttribute('aria-label', '搜索任务模板');
+    search.oninput = () => {
+      this.q = search.value.trim();
+      this.renderPicker(box, { focusSearch: true });
+    };
+    search.onkeydown = (ev) => {
+      if (ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const firstCard = box.querySelector('.tpl-card');
+        firstCard?.focus({ preventScroll: true });
+        requestAnimationFrame(() => firstCard?.focus({ preventScroll: true }));
+        return;
+      }
+      if (ev.key === 'Escape' && this.q) {
+        ev.preventDefault();
+        this.clearSearch(box);
+      }
+    };
+    box.appendChild(search);
+    if (opts.focusSearch) {
+      search.focus({ preventScroll: true });
+      search.setSelectionRange(search.value.length, search.value.length);
+    }
     const chips = document.createElement('div');
     chips.className = 'tpl-chips';
     depts.forEach((d) => {
       const b = document.createElement('button');
       b.className = 'tpl-chip' + (d === this.dept ? ' on' : '');
-      b.textContent = d;
+      b.innerHTML = `<span>${escapeHtml(d)}</span><span class="tpl-chip-count">${templateDepartmentCount(d)}</span>`;
       b.onclick = () => { this.dept = d; localStorage.setItem('fb_tpl_dept', d); this.renderPicker(box); };
       chips.appendChild(b);
     });
     box.appendChild(chips);
     const grid = document.createElement('div');
     grid.className = 'tpl-grid';
+    if (!list.length) {
+      const empty = document.createElement('div');
+      empty.className = 'tpl-empty';
+      empty.textContent = this.q ? `没有找到匹配的模板：${this.q}` : '这个部门暂无模板';
+      if (this.q) {
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.textContent = '清空搜索';
+        clear.onclick = () => this.clearSearch(box);
+        empty.append(' ', clear);
+      }
+      box.appendChild(empty);
+      chat.scroll();
+      return;
+    }
     list.forEach((t) => {
       const c = document.createElement('button');
       c.className = 'tpl-card';
-      c.innerHTML = `<span class="tpl-ico">${t.icon || '📋'}</span><span class="tpl-t">${escapeHtml(t.title)}</span><span class="tpl-d">${escapeHtml(t.desc || '')}</span>`;
+      c.innerHTML = `<span class="tpl-card-top"><span class="tpl-ico">${t.icon || '📋'}</span><span class="tpl-dept">${escapeHtml(t.dept || '')}</span></span><span class="tpl-t">${escapeHtml(t.title)}</span><span class="tpl-d">${escapeHtml(t.desc || '')}</span>`;
       c.onclick = () => this.renderRunner(box, t);
+      c.onkeydown = (ev) => {
+        const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Escape'];
+        if (!keys.includes(ev.key)) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ev.key === 'Escape') {
+          search.focus({ preventScroll: true });
+          search.setSelectionRange(search.value.length, search.value.length);
+          requestAnimationFrame(() => {
+            search.focus({ preventScroll: true });
+            search.setSelectionRange(search.value.length, search.value.length);
+          });
+          return;
+        }
+        const cards = Array.from(box.querySelectorAll('.tpl-card'));
+        const idx = cards.indexOf(c);
+        const delta = ev.key === 'ArrowRight' || ev.key === 'ArrowDown'
+          ? 1
+          : (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' ? -1 : 0);
+        const next = cards[Math.max(0, Math.min(cards.length - 1, idx + delta))];
+        if (next === c && delta < 0) {
+          search.focus({ preventScroll: true });
+          search.setSelectionRange(search.value.length, search.value.length);
+          return;
+        }
+        next?.focus({ preventScroll: true });
+      };
       grid.appendChild(c);
     });
     box.appendChild(grid);
@@ -6399,7 +7073,7 @@ const tpl = {
     if (t.needsFiles || t.filesHint) {
       const fh = document.createElement('div');
       fh.className = 'tpl-files';
-      fh.textContent = `📎 ${t.filesHint || '选中文件或拖进对话区作为附件'}${t.needsFiles ? '（必需）' : '（可选）'}`;
+      fh.textContent = `📎 ${t.filesHint || '选中文件或拖进对话区附加路径'}${t.needsFiles ? '（必需）' : '（可选）'}`;
       const ctx = document.createElement('div');
       ctx.id = 'tpl-attachment-context';
       const attachmentHint = templateAttachmentContextSummary();
@@ -6408,12 +7082,34 @@ const tpl = {
       form.appendChild(fh);
     }
     const inputs = {};
+    const submitTemplate = () => this.run(t, inputs);
     (t.fields || []).forEach((f) => {
       const lab = document.createElement('label');
       lab.className = 'tpl-field';
       lab.innerHTML = `<span>${escapeHtml(f.label)}${f.optional ? '' : ' *'}</span>`;
       const inp = document.createElement('input');
       inp.placeholder = f.placeholder || '';
+      inp.setAttribute('aria-invalid', 'false');
+      inp.addEventListener('input', () => {
+        inp.setAttribute('aria-invalid', 'false');
+        lab.classList.remove('invalid');
+      });
+      inp.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && !ev.isComposing) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this.renderPicker(box, { focusSearch: true });
+          requestAnimationFrame(() => {
+            const search = box.querySelector('.tpl-search');
+            if (search) search.focus({ preventScroll: true });
+          });
+          return;
+        }
+        if (ev.key === 'Enter' && !ev.isComposing) {
+          ev.preventDefault();
+          submitTemplate();
+        }
+      });
       inputs[f.key] = inp;
       lab.appendChild(inp);
       form.appendChild(lab);
@@ -6421,9 +7117,13 @@ const tpl = {
     const go = document.createElement('button');
     go.className = 'chat-send-btn tpl-go';
     go.textContent = '开始执行';
-    go.onclick = () => this.run(t, inputs);
+    go.onclick = submitTemplate;
     form.appendChild(go);
     box.appendChild(form);
+    requestAnimationFrame(() => {
+      const firstInput = form.querySelector('.tpl-field input');
+      if (firstInput) firstInput.focus({ preventScroll: true });
+    });
     chat.scroll();
   },
   run(t, inputs) {
@@ -6436,11 +7136,17 @@ const tpl = {
       toast('当前选中的是文件夹或磁盘，这个模板需要文件附件', true);
       return;
     }
-    if (t.needsFiles && !chat.attachments.length) { toast('这个模板需要先把文件拖进对话区作为附件', true); return; }
+    if (t.needsFiles && !chat.attachments.length) { toast('这个模板需要先把文件路径附加到对话区', true); return; }
     const vals = {};
     for (const f of (t.fields || [])) {
       const v = (inputs[f.key].value || '').trim();
-      if (!v && !f.optional) { toast(`「${f.label}」需要填写`, true); inputs[f.key].focus(); return; }
+      if (!v && !f.optional) {
+        inputs[f.key].setAttribute('aria-invalid', 'true');
+        inputs[f.key].closest('.tpl-field')?.classList.add('invalid');
+        toast(`「${f.label}」需要填写`, true);
+        inputs[f.key].focus();
+        return;
+      }
       vals[f.key] = v;
     }
     const prompt = t.prompt.replace(/\{(\w+)\}/g, (m, k) => (vals[k] !== undefined ? (vals[k] || '无特别要求') : m));
@@ -6454,6 +7160,10 @@ const chat = {
   chats: [],
   attachments: [],
   busy: false,
+  providerReady: true,
+  providerMissingKeyLabel: '',
+  providerUnavailableLabel: '',
+  providerUnavailableReason: '',
   open() {
     $('#terminal-panel').classList.remove('hidden');
     $('#terminal-resizer').classList.remove('hidden');
@@ -6515,6 +7225,7 @@ const chat = {
     });
     this.refreshTemplateAttachmentContext();
     this.refreshComposerContext();
+    this.updateComposer();
   },
   refreshTemplateAttachmentContext() { refreshTemplateAttachmentContextSummary(); },
   refreshComposerContext() { refreshChatComposerContext(); },
@@ -6522,7 +7233,16 @@ const chat = {
     try {
       const r = await api('/api/ai/providers');
       const a = r.providers[r.active];
-      $('#chat-model').textContent = a ? `${a.label} · ${a.model}${a.hasKey ? '' : '（未配 key）'}` : '';
+      const usability = aiProviderUsability(r.active, a);
+      this.providerReady = usability.ready;
+      this.providerUnavailableLabel = usability.ready ? '' : a.label;
+      this.providerUnavailableReason = usability.reason || '';
+      this.providerMissingKeyLabel = this.providerUnavailableReason.includes('API key') ? this.providerUnavailableLabel : '';
+      const problem = this.providerUnavailableReason.includes('API key') ? '（未配 key）'
+        : (this.providerUnavailableReason === '需要填写 Base URL' ? '（缺 Base URL）'
+          : (this.providerUnavailableReason === '还没选择模型' ? '（未选模型）' : ''));
+      $('#chat-model').textContent = a ? `${a.label} · ${a.model || '未选模型'}${problem}` : '';
+      this.updateComposer();
     } catch { /* */ }
   },
   // ---------- 会话列表（左栏）----------
@@ -6536,8 +7256,11 @@ const chat = {
     for (const c of this.chats) {
       const row = document.createElement('div');
       const ap = this.hasPendingApproval(c.id);
+      const fullTitle = c.title || '未命名';
+      const fullCwd = c.cwd || '';
       row.className = 'chat-item' + (c.id === this.currentChat ? ' sel' : '') + (this.isBusy(c.id) ? ' running' : '') + (ap ? ' approval' : '');
-      row.innerHTML = `<span class="ci-title">${escapeHtml(c.title || '未命名')}${ap ? '<i class="ci-appr">待审批</i>' : ''}</span><span class="ci-sub">${escapeHtml(tilde(c.cwd || ''))}</span><button class="ci-del" title="删除会话">✕</button>`;
+      row.title = `${fullTitle}\n${fullCwd || '未绑定目录'}`;
+      row.innerHTML = `<span class="ci-title">${escapeHtml(fullTitle)}${ap ? '<i class="ci-appr">待审批</i>' : ''}</span><span class="ci-sub">${escapeHtml(tilde(fullCwd))}</span><button class="ci-del" title="删除会话">✕</button>`;
       row.onclick = () => this.openChat(c.id);
       row.querySelector('.ci-del').onclick = async (e) => {
         e.stopPropagation();
@@ -6574,14 +7297,21 @@ const chat = {
       return;
     }
     for (const m of r.messages) {
-      if (m.role === 'user') { const u = this.msgEl('user'); u.textContent = m.text; }
+      if (m.role === 'user') {
+        const u = this.msgEl('user');
+        u.textContent = m.text;
+        if (m.attachments && m.attachments.length) u.appendChild(renderSentAttachmentSummary(m.attachments));
+      }
       else if (m.role === 'assistant') {
         const a = this.msgEl('assistant');
         const md = document.createElement('div');
         md.className = 'md-body chat-md';
         md.innerHTML = window.marked && !window.__noMarked ? window.marked.parse(m.text) : escapeHtml(m.text);
-        enhanceChatPathActions(md);
+        enhanceChatPathActions(md, r.chat && r.chat.cwd);
+        enhanceChatCodeBlocks(md);
+        enhanceChatTables(md);
         a.appendChild(md);
+        appendAssistantCopyAction(a, () => m.text || '');
       } else if (m.role === 'tool') {
         const a = box.lastElementChild && box.lastElementChild.classList.contains('assistant') ? box.lastElementChild : this.msgEl('assistant');
         const line = document.createElement('div');
@@ -6602,8 +7332,10 @@ const chat = {
   },
   // 按会话记账的运行状态：每个会话各自有发送/停止态，多会话可并行、各停各的
   busyChats: new Set(),
+  stoppingChats: new Set(),
   pendingApprovals: new Map(), // chatId -> Map(approvalId -> {name,args,ts})
   isBusy(id) { return this.busyChats.has(id || '__new__'); },
+  isStopping(id) { return this.stoppingChats.has(id || '__new__'); },
   hasPendingApproval(id) {
     const m = this.pendingApprovals.get(id || '__new__');
     return !!(m && m.size);
@@ -6615,6 +7347,10 @@ const chat = {
   },
   migrateChatState(from, to) {
     if (!from || !to || from === to) return;
+    if (this.stoppingChats.has(from)) {
+      this.stoppingChats.delete(from);
+      this.stoppingChats.add(to);
+    }
     const ap = this.pendingApprovals.get(from);
     if (ap) {
       const dst = this.pendingApprovals.get(to) || new Map();
@@ -6681,16 +7417,43 @@ const chat = {
   },
   updateComposer() {
     const b = this.isBusy(this.currentChat);
-    $('#chat-send').disabled = b;
-    $('#chat-stop').classList.toggle('hidden', !b);
+    const stopping = this.isStopping(this.currentChat);
+    const send = $('#chat-send');
+    const stop = $('#chat-stop');
+    const hasText = this.hasComposerText();
+    const hasSelectedContext = !this.attachments.length && chatSelectedAttachablePaths().length;
+    if (b) {
+      send.disabled = true;
+      send.title = '当前对话正在运行，可先停止或切到其它会话';
+    } else if (!this.providerReady) {
+      send.disabled = true;
+      send.title = `${this.providerUnavailableLabel || '当前服务商'} ${this.providerUnavailableReason || '暂不可用'}，请先点设置`;
+    } else {
+      send.disabled = !hasText;
+      if (hasText) send.title = hasSelectedContext ? '发送文本；当前选中文件不会自动发送，可先点“附加选中”' : '发送给 AI';
+      else send.title = this.attachments.length
+        ? '已附加路径，请补一句要 AI 做什么'
+        : (hasSelectedContext ? '当前选中文件不会自动发送，请先输入任务并点“附加选中”' : '输入要 AI 做的事后发送');
+    }
+    stop.classList.toggle('hidden', !b);
+    stop.textContent = stopping ? '停止中…' : '⏹ 停止';
+    stop.disabled = stopping;
+    stop.title = stopping ? '正在停止当前对话' : '停止当前对话';
   },
+  hasComposerText() { return !!String($('#chat-input')?.value || '').trim(); },
   // forcedText：跳过输入框直接发这段文字（任务模板组装的提示词走这里）
   // displayText：用户气泡里显示的人话摘要（不给非技术用户看大段提示词）
   async send(forcedText, displayText) {
-    if (this.isBusy(this.currentChat)) return; // 当前会话有回合在跑；别的会话不受影响
+    if (this.isBusy(this.currentChat)) { promptForBusyChat(); return; }
+    if (!this.providerReady) { promptForMissingProviderKey(); return; }
     const input = $('#chat-input');
     const text = (forcedText !== undefined ? forcedText : input.value).trim();
-    if (!text && !this.attachments.length) return;
+    if (!text && this.attachments.length) { promptForAttachmentInstruction(); return; }
+    if (!text && chatSelectedAttachablePaths().length) { promptForSelectedContextInstruction(); return; }
+    if (text && forcedText === undefined && !this.attachments.length && chatSelectedAttachablePaths().length) { promptForUnattachedSelectedContext(); return; }
+    if (!text) return;
+    const draftText = forcedText === undefined ? text : '';
+    const draftAttachments = this.attachments.slice();
     tpl.clear(); // 发送时收起模板区
     const payload = { chatId: this.currentChat, text, title: (displayText || text).slice(0, 40), attachments: this.attachments.slice(), cwd: state.cwd };
     let busyKey = this.currentChat || '__new__'; // 新会话先用占位 key，拿到正式 id 后置换
@@ -6709,12 +7472,35 @@ const chat = {
     // 助手回合容器：text/工具状态/审批卡片按到达顺序追加；文本按段落用 marked 渲染
     const a = this.msgEl('assistant');
     let mdBuf = '', mdDiv = null, thinkBox = null, renderTimer = null;
+    let assistantCopyText = '';
+    let assistantHadOutput = false;
+    let streamHadError = false;
+    const assistantCopyBtn = appendAssistantCopyAction(a, () => assistantCopyText);
+    const clearThink = () => { if (thinkBox) { thinkBox.remove(); thinkBox = null; } };
+    const restoreFailedChatDraft = (message) => {
+      if (forcedText !== undefined || assistantHadOutput) return;
+      if (/已停止/.test(String(message || ''))) return;
+      let restored = false;
+      if (draftText && !String(input.value || '').trim()) {
+        input.value = draftText;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        restored = true;
+      }
+      if (draftAttachments.length && !this.attachments.length) {
+        this.attachments = draftAttachments.slice();
+        this.renderChips();
+        restored = true;
+      }
+      if (restored) toast('发送失败，已恢复输入和附件，可修改后重试', true);
+    };
     const renderMd = () => {
       renderTimer = null;
       if (!mdBuf) return;
       if (!mdDiv) { mdDiv = document.createElement('div'); mdDiv.className = 'md-body chat-md'; a.appendChild(mdDiv); }
       mdDiv.innerHTML = window.marked && !window.__noMarked ? window.marked.parse(mdBuf) : escapeHtml(mdBuf);
-      enhanceChatPathActions(mdDiv);
+      enhanceChatPathActions(mdDiv, payload.cwd);
+      enhanceChatCodeBlocks(mdDiv);
+      enhanceChatTables(mdDiv);
       this.scroll();
     };
     const endSegment = () => { if (renderTimer) { clearTimeout(renderTimer); renderMd(); } mdBuf = ''; mdDiv = null; };
@@ -6729,6 +7515,7 @@ const chat = {
       }
       if (ev.type === 'meta') { $('#chat-model').textContent = `${ev.provider} · ${ev.model}`; return; }
       if (ev.type === 'done') {
+        clearThink();
         if (ev.cost > 0) {
           const c = document.createElement('div');
           c.className = 'chat-cost';
@@ -6739,21 +7526,26 @@ const chat = {
       }
       if (ev.type === 'think') {
         if (!thinkBox) {
-          thinkBox = document.createElement('details');
+          thinkBox = document.createElement('div');
           thinkBox.className = 'chat-think';
-          thinkBox.innerHTML = '<summary>思考过程</summary><pre></pre>';
+          thinkBox.textContent = '思考中…';
           a.appendChild(thinkBox);
         }
-        thinkBox.querySelector('pre').textContent += ev.delta;
         return;
       }
       if (ev.type === 'text') {
+        clearThink();
+        assistantCopyText += ev.delta || '';
+        updateAssistantCopyActionState(assistantCopyBtn, () => assistantCopyText);
         mdBuf += ev.delta;
+        if (ev.delta) assistantHadOutput = true;
         if (!renderTimer) renderTimer = setTimeout(renderMd, 80);
         return;
       }
       if (ev.type === 'tool') {
+        clearThink();
         endSegment();
+        assistantHadOutput = true;
         const line = renderChatToolLine(ev);
         a.appendChild(line);
         toolLines.push(line);
@@ -6762,8 +7554,13 @@ const chat = {
       }
       if (ev.type === 'tool_done') {
         const line = toolLines.find((l) => l.querySelector('.ct-spin'));
-        if (line) {
-          line.querySelector('.ct-spin').outerHTML = '<span class="ct-ok">✓</span>';
+        const stateNode = line && line.querySelector('.ct-state');
+        if (line && stateNode) {
+          stateNode.className = 'ct-state ct-ok';
+          stateNode.textContent = '✓';
+          const labelNode = line.querySelector('.ct-label');
+          if (labelNode) labelNode.textContent = aiToolDoneLabel(line.dataset.tool);
+          line.classList.add('done');
           syncChatToolFileDone(line).catch(() => {});
         }
         return;
@@ -6773,51 +7570,73 @@ const chat = {
         return;
       }
       if (ev.type === 'approval') {
+        clearThink();
         endSegment();
+        assistantHadOutput = true;
         this.markApproval(busyKey, ev.id, ev);
         this.appendApprovalCard(a, busyKey, ev.id, ev);
         return;
       }
       if (ev.type === 'error') {
+        streamHadError = true;
+        clearThink();
         endSegment();
         const er = document.createElement('div');
         er.className = 'chat-error';
-        er.textContent = '⚠ ' + ev.message;
+        const friendly = friendlyChatError(ev.message);
+        er.textContent = '⚠ ' + friendly;
+        appendChatErrorActions(er, ev.message, friendly, () => this.send());
         a.appendChild(er);
+        restoreFailedChatDraft(ev.message);
         this.scroll();
         return;
       }
     };
     try {
       const res = await fetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let i;
-        while ((i = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, i).trim();
-          buf = buf.slice(i + 1);
-          if (!line.startsWith('data:')) continue;
-          let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
-          onEvent(ev);
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        const message = friendlyChatHttpError(res.status, res.statusText, detail);
+        onEvent({ type: 'error', message });
+      } else if (!res.body) {
+        onEvent({ type: 'error', message: 'AI 服务没有返回可读取内容' });
+      } else {
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i).trim();
+            buf = buf.slice(i + 1);
+            if (!line.startsWith('data:')) continue;
+            let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
+            onEvent(ev);
+          }
         }
+        if (!assistantHadOutput && !streamHadError) onEvent({ type: 'error', message: 'AI 连接提前结束，未返回内容' });
       }
     } catch (e) {
-      onEvent({ type: 'error', message: '连接中断: ' + e.message });
+      onEvent({ type: 'error', message: e.message });
     }
     endSegment();
     if (!a.childNodes.length) a.remove(); // 全程没产出（比如配置错误已在 error 行展示过）就别留空气泡
     this.busyChats.delete(busyKey);
+    this.stoppingChats.delete(busyKey);
     this.updateComposer();
     this.loadChats(); // 新会话进列表 / 时间戳置顶
   },
   stop() {
     // 只停「当前正在看的会话」——别的会话各跑各的，互不干涉
     if (!this.isBusy(this.currentChat)) return;
+    if (this.isStopping(this.currentChat)) { toast('正在停止当前对话…'); return; }
+    const key = this.currentChat || '__new__';
+    this.stoppingChats.add(key);
+    this.updateComposer();
+    toast('正在停止当前对话…');
     fetch('/api/ai/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: this.currentChat }) }).catch(() => {});
   },
   initSideResize() {
@@ -6830,10 +7649,15 @@ const chat = {
       const max = Math.max(180, Math.min(420, hostW - 320));
       const width = Math.round(Math.min(max, Math.max(132, Number(w) || 168)));
       document.documentElement.style.setProperty('--chat-side-w', `${width}px`);
+      handle.setAttribute('aria-valuemin', '132');
+      handle.setAttribute('aria-valuemax', String(max));
+      handle.setAttribute('aria-valuenow', String(width));
       if (persist) localStorage.setItem(CHAT_SIDE_WIDTH_KEY, String(width));
+      return width;
     };
+    const currentWidth = () => side.getBoundingClientRect().width || Number(localStorage.getItem(CHAT_SIDE_WIDTH_KEY)) || 168;
     const saved = Number(localStorage.getItem(CHAT_SIDE_WIDTH_KEY));
-    if (saved) apply(saved, false);
+    apply(saved || 168, false);
     handle.addEventListener('pointerdown', (e) => {
       if (e.button !== undefined && e.button !== 0) return;
       e.preventDefault();
@@ -6853,12 +7677,31 @@ const chat = {
       window.addEventListener('pointerup', up);
       window.addEventListener('pointercancel', up);
     });
+    handle.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 40 : 20;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        apply(currentWidth() - step, true);
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        apply(currentWidth() + step, true);
+      }
+      if (e.key === 'Home') {
+        e.preventDefault();
+        apply(132, true);
+      }
+      if (e.key === 'End') {
+        e.preventDefault();
+        apply(9999, true);
+      }
+    });
   },
   init() {
     $('#btn-chat').onclick = () => this.toggle();
     $('#mode-chat').onclick = () => setDockMode('chat');
     $('#mode-term').onclick = () => {
-      if (!term.available()) { toast('网页版没有内嵌终端，桌面版才有', true); return; }
+      if (!term.available()) { toast(terminalUnavailableMessage(), true); return; }
       if (!term.sessions.length) term.newTab();
       setDockMode('term');
     };
@@ -6869,6 +7712,7 @@ const chat = {
     $('#chat-settings').onclick = () => aiSettings.open();
     this.initSideResize();
     const input = $('#chat-input');
+    input.addEventListener('input', () => this.updateComposer());
     input.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); this.send(); }
@@ -6910,6 +7754,7 @@ const chat = {
       if (p && looksLikePath(p)) this.addAttachment(p);
       else if (p) toast('拖入的内容不是可读取的文件路径', true);
     });
+    this.updateComposer();
     this.refreshModelLabel();
   },
 };
@@ -6918,7 +7763,7 @@ const chat = {
 const aiSettings = {
   data: null, sel: null, modelsCache: {},
   async open() {
-    try { this.data = await api('/api/ai/providers'); } catch (e) { toast('读取 AI 配置失败: ' + e.message, true); return; }
+    try { this.data = await api('/api/ai/providers'); } catch (e) { toast('读取 AI 配置失败：' + friendlyAiSettingsError(e), true); return; }
     this.sel = this.data.active;
     this.render();
     $('#ai-settings').classList.remove('hidden');
@@ -6943,6 +7788,7 @@ const aiSettings = {
     $('#ai-status').textContent = p.note || '';
     // 预设的建议模型先展示出来；有 key 的服务商自动拉一次实时列表（带缓存，不重复打 API）
     this.renderModelPick(this.modelsCache[this.sel] || p.models || []);
+    this.refreshSaveState();
     if (p.hasKey && !this.modelsCache[this.sel]) this.fetchModels(true);
   },
   renderApprovalMode() {
@@ -6965,6 +7811,7 @@ const aiSettings = {
       b.onclick = () => { $('#ai-model').value = m; this.renderModelPick(models); };
       box.appendChild(b);
     }
+    this.refreshSaveState();
   },
   async fetchModels(silent) {
     if (!silent) $('#ai-status').textContent = '拉取中…';
@@ -6978,24 +7825,65 @@ const aiSettings = {
       this.modelsCache[this.sel] = r.models;
       this.renderModelPick(r.models);
       $('#ai-status').textContent = `拉到 ${r.models.length} 个模型，点下方选择`;
-    } catch (e) { if (!silent) $('#ai-status').textContent = '拉取失败: ' + e.message; }
+    } catch (e) { if (!silent) $('#ai-status').textContent = '拉取失败：' + friendlyAiSettingsError(e); }
+  },
+  draftUsability() {
+    const selectedProvider = this.data.providers[this.sel];
+    const key = $('#ai-key').value.trim();
+    const baseUrl = $('#ai-baseurl').value.trim();
+    const model = $('#ai-model').value.trim();
+    if (this.sel !== 'claude' && !selectedProvider.hasKey && !key) {
+      return { ok: false, field: 'ai-key', message: `${selectedProvider.label} 需要先填写 API key` };
+    }
+    if (this.sel === 'custom' && !baseUrl) {
+      return { ok: false, field: 'ai-baseurl', message: `${selectedProvider.label} 需要填写 Base URL` };
+    }
+    if (!model) {
+      return { ok: false, field: 'ai-model', message: '需要先选择或填写模型' };
+    }
+    return { ok: true, field: '', message: '' };
+  },
+  refreshSaveState() {
+    if (!this.data || !this.sel) return;
+    const selectedProvider = this.data.providers[this.sel];
+    const state = this.draftUsability();
+    const save = $('#ai-save');
+    save.disabled = !state.ok;
+    save.title = state.ok ? '保存并启用当前 AI 服务商' : state.message;
+    $('#ai-status').textContent = state.ok ? (selectedProvider.note || '配置已完整，可以保存') : state.message;
+    return state;
   },
   async save() {
     const modeBtn = document.querySelector('#ai-approval-mode button.on');
-    const body = { provider: this.sel, model: $('#ai-model').value.trim(), baseUrl: $('#ai-baseurl').value.trim(), approvalMode: modeBtn ? modeBtn.dataset.mode : 'smart', activate: true };
+    const state = this.draftUsability();
+    if (!state.ok) {
+      $('#ai-status').textContent = state.message;
+      $('#' + state.field).focus();
+      return;
+    }
     const key = $('#ai-key').value.trim();
+    const baseUrl = $('#ai-baseurl').value.trim();
+    const model = $('#ai-model').value.trim();
+    const body = { provider: this.sel, model, baseUrl, approvalMode: modeBtn ? modeBtn.dataset.mode : 'smart', activate: true };
     if (key) body.apiKey = key;
     try {
-      await fetch('/api/ai/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch('/api/ai/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const detail = await res.text();
+      let payload = {};
+      try { payload = detail ? JSON.parse(detail) : {}; } catch { payload = { error: detail }; }
+      if (!res.ok || payload.ok === false) throw new Error(payload.error || detail || res.statusText || `HTTP ${res.status}`);
       toast('AI 配置已保存');
       this.close();
       chat.refreshModelLabel();
-    } catch (e) { $('#ai-status').textContent = '保存失败: ' + e.message; }
+    } catch (e) { $('#ai-status').textContent = '保存失败：' + friendlyAiSettingsError(e); }
   },
   init() {
     $('#ai-close').onclick = () => this.close();
     $('#ai-save').onclick = () => this.save();
     $('#ai-fetch-models').onclick = () => this.fetchModels();
+    $('#ai-key').addEventListener('input', () => this.refreshSaveState());
+    $('#ai-baseurl').addEventListener('input', () => this.refreshSaveState());
+    $('#ai-model').addEventListener('input', () => this.refreshSaveState());
     $('#ai-approval-mode').onclick = (e) => {
       const btn = e.target.closest('button[data-mode]');
       if (!btn || !this.data) return;
@@ -7054,6 +7942,7 @@ async function init() {
   applyLayout();
   term.applyDock(); // 初始就给 #main-body 设好 dock 类，决定预览/文件管理方向
   bindEvents();
+  renderChangesBadge();
   bindResizer();
   bindSidebarResizer();
   bindSelectionToTerminal();

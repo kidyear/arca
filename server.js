@@ -30,6 +30,7 @@ const PROJECT_PROBE_CONCURRENCY = 8;
 const PROJECT_PROBE_TIMEOUT_MS = 120;
 const DRIVE_PROBE_CONCURRENCY = 8;
 const DRIVE_PROBE_TIMEOUT_MS = 120;
+const PATH_STAT_TIMEOUT_MS = 2500;
 
 // 搜索 / 遍历时跳过的重目录，避免 vibe coding 项目里 node_modules 拖垮速度
 const IGNORE_DIRS = new Set([
@@ -297,7 +298,13 @@ async function listDir(dirPath) {
 
 async function statPath(p) {
   const real = resolvePath(p);
-  const st = await fsp.lstat(real);
+  let st;
+  try {
+    st = await withTimeout(fsp.lstat(real), PATH_STAT_TIMEOUT_MS);
+  } catch (e) {
+    if (e && e.message === 'timeout') throw new Error('访问超时：路径可能离线或网络位置不可达');
+    throw e;
+  }
   const isDir = st.isDirectory();
   const name = path.basename(real) || real;
   const info = {

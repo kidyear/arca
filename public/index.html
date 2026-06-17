@@ -126,7 +126,7 @@
           <div id="file-area" tabindex="0"></div>
           <div id="statusbar" class="hidden"></div>
         </div>
-        <div id="preview-resizer" class="hidden" title="拖动调整大小"></div>
+        <div id="preview-resizer" class="hidden" role="separator" aria-label="调整预览窗格大小" tabindex="0" title="拖动调整预览窗格大小"></div>
         <section id="preview" class="hidden">
           <header class="preview-head">
             <div class="preview-title" id="preview-title"></div>
@@ -163,17 +163,17 @@
               <button id="chat-new" title="开始新对话">＋ 新对话</button>
               <div id="chat-list"></div>
             </aside>
-            <div id="chat-side-resizer" role="separator" aria-label="调整对话列表宽度" title="拖动调整对话列表宽度"></div>
+            <div id="chat-side-resizer" role="separator" aria-label="调整对话列表宽度" aria-orientation="vertical" tabindex="0" title="拖动调整对话列表宽度"></div>
             <div id="chat-main">
               <div id="chat-msgs"><div class="chat-empty" id="chat-empty">
                 <p><b>跟 AI 说要做什么就行</b></p>
                 <p>底下跑的是完整的 Claude Code 引擎：能浏览、搜索、读写你本机的文件，也能执行命令——改文件和跑命令前都会先弹卡片征求你同意。</p>
-                <p class="chat-empty-hint">试试：「把这个文件夹里的文件按类型整理一下」· 把文件拖进来当附件 · 右上角 ⚙ 换模型</p>
+                <p class="chat-empty-hint">试试：「把这个文件夹里的文件按类型整理一下」· 拖文件进来只附加路径 · 右上角 ⚙ 换模型</p>
               </div></div>
               <div id="chat-composer">
                 <div id="chat-chips" class="hidden"></div>
                 <div id="chat-context-hint" class="chat-context-hint hidden"></div>
-                <textarea id="chat-input" rows="2" placeholder="跟 AI 说要做什么…（拖文件进来作为附件，Enter 发送，Shift+Enter 换行）"></textarea>
+                <textarea id="chat-input" rows="2" placeholder="跟 AI 说要做什么…（拖文件进来只附加路径，Enter 发送，Shift+Enter 换行）"></textarea>
                 <div class="chat-bar">
                   <span id="chat-model" class="chat-model" title="当前模型（点 ⚙ 更换）"></span>
                   <span class="chat-flex"></span>

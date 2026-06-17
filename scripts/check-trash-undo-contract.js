@@ -48,13 +48,25 @@ assertIncludes('doTrash trash item helper', sliceAsyncFunction(app, 'doTrash'), 
 assertIncludes('trashSelection', sliceAsyncFunction(app, 'trashSelection'), "/api/trash-undoable");
 assertIncludes('trashSelection undo', sliceAsyncFunction(app, 'trashSelection'), "pushUndo({ type: 'trash'");
 assertIncludes('trashSelection trash item helper', sliceAsyncFunction(app, 'trashSelection'), 'trashUndoItemFromResult');
+assertIncludes('trashSelection tracks last delete error', sliceAsyncFunction(app, 'trashSelection'), "let fail = 0, lastErr = '';");
+assertIncludes('trashSelection preserves delete error reason', sliceAsyncFunction(app, 'trashSelection'), "lastErr = friendlyErrorText(r, '删除失败');");
+assertIncludes('trashSelection reports delete error reason', sliceAsyncFunction(app, 'trashSelection'), "toast(fail ? `完成，${fail} 项删除失败${lastErr ? `：${lastErr}` : ''}` : `已把 ${items.length} 项移到废纸篓，Ctrl+Z 可恢复`);");
+assertIncludes('deleteSelectionPermanent tracks last delete error', sliceAsyncFunction(app, 'deleteSelectionPermanent'), "let fail = 0, lastErr = '';");
+assertIncludes('deleteSelectionPermanent preserves delete error reason', sliceAsyncFunction(app, 'deleteSelectionPermanent'), "lastErr = friendlyErrorText(r, '永久删除失败');");
+assertIncludes('deleteSelectionPermanent reports delete error reason', sliceAsyncFunction(app, 'deleteSelectionPermanent'), "toast(fail ? `完成，${fail} 项永久删除失败${lastErr ? `：${lastErr}` : ''}` : `已永久删除 ${items.length} 项`);");
 assertIncludes('undoLast trash branch', sliceAsyncFunction(app, 'undoLast'), "op.type === 'trash'");
 assertIncludes('undoLast restore route', sliceAsyncFunction(app, 'undoLast'), "/api/trash-restore");
 assertIncludes('undoLast restore kind', sliceAsyncFunction(app, 'undoLast'), 'trashKind: it.trashKind');
+assertIncludes('undoLast trash tracks restore error reason', sliceAsyncFunction(app, 'undoLast'), "let fail = 0, restored = [], lastErr = '';");
+assertIncludes('undoLast trash preserves restore error reason', sliceAsyncFunction(app, 'undoLast'), "lastErr = r.error || '恢复失败';");
+assertIncludes('undoLast trash reports restore error reason', sliceAsyncFunction(app, 'undoLast'), "toast(fail ? `撤销删除完成，${fail} 项恢复失败${lastErr ? `：${lastErr}` : ''}` : `已恢复 ${restored.length} 项`);");
 assertIncludes('undoLast redo', sliceAsyncFunction(app, 'undoLast'), 'pushRedo({ ...op');
 assertIncludes('redoLast trash branch', sliceAsyncFunction(app, 'redoLast'), "op.type === 'trash'");
 assertIncludes('redoLast undoable route', sliceAsyncFunction(app, 'redoLast'), "/api/trash-undoable");
 assertIncludes('redoLast trash item helper', sliceAsyncFunction(app, 'redoLast'), 'trashUndoItemFromResult');
+assertIncludes('redoLast trash tracks delete error reason', sliceAsyncFunction(app, 'redoLast'), "let fail = 0, trashed = [], lastErr = '';");
+assertIncludes('redoLast trash preserves delete error reason', sliceAsyncFunction(app, 'redoLast'), "lastErr = r.error || '删除失败';");
+assertIncludes('redoLast trash reports delete error reason', sliceAsyncFunction(app, 'redoLast'), "toast(fail ? `重做删除完成，${fail} 项失败${lastErr ? `：${lastErr}` : ''}` : `已重做删除 ${trashed.length} 项`);");
 assertIncludes('redoLast push undo', sliceAsyncFunction(app, 'redoLast'), "pushUndo({ ...op");
 
 assertIncludes('docs', docs, 'Ctrl+Z 撤销回收站删除');
